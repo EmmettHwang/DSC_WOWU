@@ -4,7 +4,7 @@ const API_BASE_URL = '';
 window.API_BASE_URL = API_BASE_URL; // 전역으로 노출
 
 // ==================== 앱 버전 및 기본값 관리 ====================
-const APP_VERSION = '1.1.1'; // 앱 버전
+const APP_VERSION = '1.1.2'; // 앱 버전
 const DEFAULT_SYSTEM_TITLE = '교육관리시스템'; // 기본 시스템 제목
 window.APP_VERSION = APP_VERSION;
 window.DEFAULT_SYSTEM_TITLE = DEFAULT_SYSTEM_TITLE;
@@ -883,10 +883,24 @@ window.uploadFilesWithCompression = async function(files, category, progressBar)
 // 모든 세션 데이터 클리어 함수
 function clearAllSessions() {
     console.log('🧹 모든 세션 데이터 클리어 중...');
-    
-    // localStorage 완전 클리어
+
+    // 유지할 설정 백업 (테마, 로고 등)
+    const preserveKeys = ['system_theme', 'logo_url', 'system_title', 'saved_name', 'remember_name'];
+    const preserved = {};
+    preserveKeys.forEach(key => {
+        const value = localStorage.getItem(key);
+        if (value) preserved[key] = value;
+    });
+
+    // localStorage 클리어
     localStorage.clear();
-    
+
+    // 백업한 설정 복원
+    Object.keys(preserved).forEach(key => {
+        localStorage.setItem(key, preserved[key]);
+    });
+    console.log('💾 유지된 설정:', Object.keys(preserved));
+
     // sessionStorage도 클리어
     sessionStorage.clear();
     
@@ -14422,8 +14436,8 @@ window.resetSystemSettings = async function() {
 // ==================== 테마 설정 ====================
 const THEME_PRESETS = {
     default: {
-        menubar: '#1e40af',
-        title: '#1e3a8a',
+        menubar: '#2563eb',
+        title: '#1e40af',
         subtitle: '#374151',
         menuActive: '#3b82f6'
     },
@@ -14531,8 +14545,8 @@ window.applyTheme = function(theme) {
         theme = JSON.parse(localStorage.getItem('system_theme') || 'null') || THEME_PRESETS.default;
     }
 
-    const menubar = theme.menubar || '#1e40af';
-    const title = theme.title || '#1e3a8a';
+    const menubar = theme.menubar || '#2563eb';
+    const title = theme.title || '#1e40af';
     const subtitle = theme.subtitle || '#374151';
     const menuActive = theme.menuActive || '#3b82f6';
 
