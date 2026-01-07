@@ -14436,7 +14436,7 @@ window.resetSystemSettings = async function() {
 // ==================== 테마 설정 ====================
 const THEME_PRESETS = {
     default: {
-        menubar: '#2563eb',
+        menubar: '#3173f1',
         title: '#1e40af',
         subtitle: '#374151',
         menuActive: '#3b82f6'
@@ -14545,7 +14545,7 @@ window.applyTheme = function(theme) {
         theme = JSON.parse(localStorage.getItem('system_theme') || 'null') || THEME_PRESETS.default;
     }
 
-    const menubar = theme.menubar || '#2563eb';
+    const menubar = theme.menubar || '#3173f1';
     const title = theme.title || '#1e40af';
     const subtitle = theme.subtitle || '#374151';
     const menuActive = theme.menuActive || '#3b82f6';
