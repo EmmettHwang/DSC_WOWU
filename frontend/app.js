@@ -19533,10 +19533,16 @@ async function loadBackupManager() {
                                 <p class="text-sm text-red-600">자동 백업 후 데이터를 초기화합니다</p>
                             </div>
                         </div>
-                        <button onclick="openDbManagementModal('reset')"
-                            class="w-full bg-red-600 hover:bg-red-700 text-white font-semibold py-3 px-4 rounded-lg transition-colors">
-                            <i class="fas fa-trash-alt mr-2"></i>초기화 실행
-                        </button>
+                        <div class="grid grid-cols-2 gap-2">
+                            <button onclick="showTableSelectModal('reset')"
+                                class="bg-orange-500 hover:bg-orange-600 text-white font-semibold py-3 px-4 rounded-lg transition-colors">
+                                <i class="fas fa-list-check mr-2"></i>선택 삭제
+                            </button>
+                            <button onclick="openDbManagementModal('reset')"
+                                class="bg-red-600 hover:bg-red-700 text-white font-semibold py-3 px-4 rounded-lg transition-colors">
+                                <i class="fas fa-trash-alt mr-2"></i>전체 초기화
+                            </button>
+                        </div>
                     </div>
                 </div>
 
@@ -20178,12 +20184,18 @@ async function refreshBackupList() {
                         </div>
                     </div>
                     <div class="flex space-x-2">
+                        <button onclick="showTableSelectModal('restore', '${backup.filename}')"
+                            class="px-3 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 text-sm"
+                            title="테이블 선택하여 복구">
+                            <i class="fas fa-list-check mr-1"></i>선택 복구
+                        </button>
                         <button onclick="restoreBackup('${backup.filename}')"
-                            class="px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600">
-                            <i class="fas fa-undo mr-1"></i>복구
+                            class="px-3 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 text-sm"
+                            title="전체 복구">
+                            <i class="fas fa-undo mr-1"></i>전체 복구
                         </button>
                         <button onclick="deleteBackup('${backup.filename}')"
-                            class="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600">
+                            class="px-3 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 text-sm">
                             <i class="fas fa-trash mr-1"></i>삭제
                         </button>
                     </div>
@@ -20230,6 +20242,208 @@ async function cleanupOldBackups() {
         showAlert('백업 정리에 실패했습니다', 'error');
     }
 }
+
+// 테이블 선택 모달 기능
+let tableSelectAction = '';  // 'restore' 또는 'reset'
+let tableSelectFile = '';
+let selectedTables = [];
+
+window.showTableSelectModal = async function(action, filename = '') {
+    tableSelectAction = action;
+    tableSelectFile = filename;
+    selectedTables = [];
+
+    const isRestore = action === 'restore';
+    const title = isRestore ? '테이블 선택 복구' : '테이블 선택 삭제';
+    const color = isRestore ? 'purple' : 'red';
+
+    // 테이블 정보 로드
+    let tablesInfo;
+    try {
+        showLoading('테이블 정보 로드 중...');
+        if (isRestore) {
+            const res = await axios.get(`${API_BASE_URL}/api/db-management/backup-info/${filename}`);
+            tablesInfo = res.data.tables;
+        } else {
+            const res = await axios.get(`${API_BASE_URL}/api/db-management/current-tables`);
+            tablesInfo = res.data.tables;
+        }
+        hideLoading();
+    } catch (error) {
+        hideLoading();
+        showAlert('테이블 정보를 불러오지 못했습니다', 'error');
+        return;
+    }
+
+    const modalHtml = `
+        <div id="table-select-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[9999]">
+            <div class="bg-white rounded-2xl shadow-2xl max-w-lg w-full mx-4 overflow-hidden">
+                <div class="p-6 bg-gradient-to-r from-${color}-500 to-${color}-600">
+                    <div class="flex items-center gap-3">
+                        <i class="fas fa-table text-3xl text-white"></i>
+                        <div>
+                            <h3 class="text-xl font-bold text-white">${title}</h3>
+                            <p class="text-${color}-100 text-sm">${isRestore ? filename : '현재 DB에서 삭제할 테이블 선택'}</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="p-6">
+                    <div class="mb-4 flex justify-between items-center">
+                        <span class="text-sm text-gray-500">복구/삭제할 테이블을 선택하세요</span>
+                        <div class="space-x-2">
+                            <button onclick="toggleAllTables(true)" class="text-sm text-blue-600 hover:underline">전체 선택</button>
+                            <button onclick="toggleAllTables(false)" class="text-sm text-gray-600 hover:underline">전체 해제</button>
+                        </div>
+                    </div>
+                    <div class="max-h-[300px] overflow-y-auto space-y-2" id="table-checkbox-list">
+                        ${tablesInfo.map(t => `
+                            <label class="flex items-center p-3 border rounded-lg hover:bg-gray-50 cursor-pointer">
+                                <input type="checkbox" value="${t.table}"
+                                    class="table-checkbox w-5 h-5 text-${color}-600 rounded focus:ring-${color}-500"
+                                    onchange="updateTableSelection()">
+                                <span class="ml-3 flex-1">
+                                    <span class="font-medium text-gray-800">${t.name_kr}</span>
+                                    <span class="text-gray-400 text-sm ml-2">(${t.table})</span>
+                                </span>
+                                <span class="text-sm text-gray-500">${t.count}건</span>
+                            </label>
+                        `).join('')}
+                    </div>
+                    <div class="mt-4 p-3 bg-gray-100 rounded-lg">
+                        <p class="text-sm text-gray-600">
+                            <i class="fas fa-check-square mr-1 text-${color}-500"></i>
+                            선택됨: <span id="selected-table-count" class="font-semibold">0</span>개 테이블
+                        </p>
+                    </div>
+                    ${!isRestore ? `
+                        <div class="mt-3 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+                            <p class="text-sm text-yellow-800">
+                                <i class="fas fa-exclamation-triangle mr-1"></i>
+                                강사(instructors) 삭제 시 <strong>root</strong> 계정으로 접속하세요
+                            </p>
+                        </div>
+                    ` : ''}
+                </div>
+                <div class="px-6 pb-6 flex justify-end gap-3">
+                    <button onclick="closeTableSelectModal()"
+                        class="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300">
+                        취소
+                    </button>
+                    <button id="table-select-confirm-btn" onclick="confirmTableSelection()"
+                        class="px-4 py-2 bg-${color}-600 text-white rounded-lg hover:bg-${color}-700 disabled:opacity-50"
+                        disabled>
+                        <i class="fas ${isRestore ? 'fa-undo' : 'fa-trash'} mr-1"></i>
+                        ${isRestore ? '선택 복구' : '선택 삭제'}
+                    </button>
+                </div>
+            </div>
+        </div>
+    `;
+
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+};
+
+window.closeTableSelectModal = function() {
+    const modal = document.getElementById('table-select-modal');
+    if (modal) modal.remove();
+};
+
+window.toggleAllTables = function(checked) {
+    document.querySelectorAll('.table-checkbox').forEach(cb => cb.checked = checked);
+    updateTableSelection();
+};
+
+window.updateTableSelection = function() {
+    selectedTables = Array.from(document.querySelectorAll('.table-checkbox:checked')).map(cb => cb.value);
+    document.getElementById('selected-table-count').textContent = selectedTables.length;
+    document.getElementById('table-select-confirm-btn').disabled = selectedTables.length === 0;
+};
+
+window.confirmTableSelection = async function() {
+    if (selectedTables.length === 0) {
+        showAlert('테이블을 선택해주세요', 'warning');
+        return;
+    }
+
+    closeTableSelectModal();
+
+    if (tableSelectAction === 'restore') {
+        // 복구 인증 모달로 이동 (선택된 테이블 정보 포함)
+        restoreWithTables(tableSelectFile, selectedTables);
+    } else {
+        // 삭제 인증 모달로 이동 (선택된 테이블 정보 포함)
+        resetWithTables(selectedTables);
+    }
+};
+
+// 테이블 선택 복구
+async function restoreWithTables(filename, tables) {
+    restoreTargetFile = filename;
+    restoreSelectedTables = tables;
+
+    const modal = document.getElementById('db-management-modal');
+    const header = document.getElementById('db-modal-header');
+    const icon = document.getElementById('db-modal-icon');
+    const title = document.getElementById('db-modal-title');
+    const desc = document.getElementById('db-modal-desc');
+    const warning = document.getElementById('db-modal-warning');
+    const confirmBtn = document.getElementById('db-modal-confirm-btn');
+
+    document.getElementById('db-mgmt-instructor-name').value = '';
+    document.getElementById('db-mgmt-password').value = '';
+
+    header.className = 'p-6 rounded-t-2xl bg-gradient-to-r from-purple-500 to-purple-600';
+    icon.innerHTML = '<i class="fas fa-list-check text-white"></i>';
+    title.textContent = '테이블 선택 복구';
+    desc.innerHTML = `
+        <strong>복구할 백업:</strong> <span class="text-purple-600">${filename}</span><br>
+        <strong>선택된 테이블 (${tables.length}개):</strong><br>
+        <span class="text-sm text-gray-600">${tables.join(', ')}</span>
+    `;
+    warning.classList.remove('hidden');
+    warning.innerHTML = `<p class="text-yellow-800 text-sm"><i class="fas fa-info-circle mr-1"></i>선택한 테이블만 복구됩니다. 복구 전 자동 백업이 생성됩니다.</p>`;
+    confirmBtn.className = 'px-6 py-2.5 bg-purple-600 hover:bg-purple-700 text-white rounded-lg font-semibold transition-colors';
+    confirmBtn.innerHTML = '<i class="fas fa-undo mr-2"></i>선택 복구';
+
+    dbManagementAction = 'partial_restore';
+    modal.classList.remove('hidden');
+    document.getElementById('db-mgmt-instructor-name').focus();
+}
+
+// 테이블 선택 삭제
+async function resetWithTables(tables) {
+    resetSelectedTables = tables;
+
+    const modal = document.getElementById('db-management-modal');
+    const header = document.getElementById('db-modal-header');
+    const icon = document.getElementById('db-modal-icon');
+    const title = document.getElementById('db-modal-title');
+    const desc = document.getElementById('db-modal-desc');
+    const warning = document.getElementById('db-modal-warning');
+    const confirmBtn = document.getElementById('db-modal-confirm-btn');
+
+    document.getElementById('db-mgmt-instructor-name').value = '';
+    document.getElementById('db-mgmt-password').value = '';
+
+    header.className = 'p-6 rounded-t-2xl bg-gradient-to-r from-orange-500 to-red-500';
+    icon.innerHTML = '<i class="fas fa-list-check text-white"></i>';
+    title.textContent = '테이블 선택 삭제';
+    desc.innerHTML = `
+        <strong>삭제할 테이블 (${tables.length}개):</strong><br>
+        <span class="text-sm text-red-600">${tables.join(', ')}</span>
+    `;
+    warning.classList.remove('hidden');
+    warning.innerHTML = `<p class="text-red-800 text-sm"><i class="fas fa-exclamation-triangle mr-1"></i>선택한 테이블의 모든 데이터가 삭제됩니다!</p>`;
+    confirmBtn.className = 'px-6 py-2.5 bg-red-600 hover:bg-red-700 text-white rounded-lg font-semibold transition-colors';
+    confirmBtn.innerHTML = '<i class="fas fa-trash mr-2"></i>선택 삭제';
+
+    dbManagementAction = 'partial_reset';
+    modal.classList.remove('hidden');
+    document.getElementById('db-mgmt-instructor-name').focus();
+}
+
+let restoreSelectedTables = [];
+let resetSelectedTables = [];
 
 // DB 복구 기능
 let restoreTargetFile = '';
@@ -20280,6 +20494,131 @@ window.restoreBackup = async function(filename) {
 // executeDbManagement 함수에 복구 로직 추가 (기존 함수 확장)
 const originalExecuteDbManagement = window.executeDbManagement;
 window.executeDbManagement = async function() {
+    // 부분 복구/삭제 처리
+    if (dbManagementAction === 'partial_restore' || dbManagementAction === 'partial_reset') {
+        const instructorName = document.getElementById('db-mgmt-instructor-name').value.trim();
+        const password = document.getElementById('db-mgmt-password').value.trim();
+
+        if (!instructorName || !password) {
+            showAlert('강사 이름과 비밀번호를 모두 입력해주세요.', 'warning');
+            return;
+        }
+
+        try {
+            showLoading('인증 확인 중...');
+            const verifyRes = await axios.post(`${API_BASE_URL}/api/db-management/verify`, {
+                instructor_name: instructorName,
+                password: password
+            });
+            hideLoading();
+
+            if (!verifyRes.data.success) {
+                showAlert(verifyRes.data.message, 'error');
+                return;
+            }
+
+            const operatorName = verifyRes.data.instructor_name;
+            const operatorCode = verifyRes.data.instructor_code;
+            closeDbManagementModal();
+
+            if (dbManagementAction === 'partial_restore') {
+                // 선택 복구
+                const tables = restoreSelectedTables;
+                const confirmed = await showConfirm(
+                    `선택한 ${tables.length}개 테이블을 복구하시겠습니까?\n\n` +
+                    `테이블: ${tables.join(', ')}\n\n` +
+                    `작업자: ${operatorName}`,
+                    '테이블 선택 복구'
+                );
+                if (!confirmed) return;
+
+                showRestoreProgress();
+                try {
+                    await new Promise(r => setTimeout(r, 800));
+                    updateRestoreProgress('backup', 25, '자동 백업 생성');
+
+                    const apiPromise = axios.post(`${API_BASE_URL}/api/db-management/restore`, {
+                        operator_name: operatorName,
+                        instructor_code: operatorCode,
+                        backup_file: restoreTargetFile,
+                        tables: tables
+                    }, { timeout: 180000 });
+
+                    for (let i = 0; i < Math.min(tables.length, 5); i++) {
+                        await new Promise(r => setTimeout(r, 400));
+                        updateRestoreProgress('restore', 25 + (i * 12), tables[i] + ' 복구');
+                    }
+
+                    const response = await apiPromise;
+                    updateRestoreProgress('complete', 100);
+                    await new Promise(r => setTimeout(r, 500));
+                    hideRestoreProgress();
+
+                    if (response.data.success) {
+                        await showCompletionScreen('restore', {
+                            operator: operatorName,
+                            total_restored: response.data.total_restored,
+                            backup_file: restoreTargetFile,
+                            pre_restore_backup: response.data.pre_restore_backup
+                        });
+                        location.reload();
+                    }
+                } catch (err) {
+                    hideRestoreProgress();
+                    showAlert(err.response?.data?.detail || '복구 실패', 'error');
+                }
+            } else {
+                // 선택 삭제
+                const tables = resetSelectedTables;
+                const confirmed = await showConfirm(
+                    `선택한 ${tables.length}개 테이블의 데이터를 삭제하시겠습니까?\n\n` +
+                    `테이블: ${tables.join(', ')}\n\n` +
+                    `작업자: ${operatorName}\n\n⚠️ 이 작업은 되돌릴 수 없습니다!`,
+                    '테이블 선택 삭제'
+                );
+                if (!confirmed) return;
+
+                showBackupProgress('reset');
+                try {
+                    await new Promise(r => setTimeout(r, 800));
+                    updateBackupProgress('tables', 30, '자동 백업 생성');
+
+                    const apiPromise = axios.post(`${API_BASE_URL}/api/db-management/reset`, {
+                        operator_name: operatorName,
+                        instructor_code: operatorCode,
+                        tables: tables
+                    }, { timeout: 120000 });
+
+                    for (let i = 0; i < Math.min(tables.length, 5); i++) {
+                        await new Promise(r => setTimeout(r, 400));
+                        updateBackupProgress('tables', 30 + (i * 12), tables[i] + ' 삭제');
+                    }
+
+                    const response = await apiPromise;
+                    updateBackupProgress('complete', 100);
+                    await new Promise(r => setTimeout(r, 500));
+                    hideBackupProgress();
+
+                    if (response.data.success) {
+                        await showCompletionScreen('reset', {
+                            operator: operatorName,
+                            total_deleted: response.data.total_deleted,
+                            backup_file: response.data.backup_file
+                        });
+                        location.reload();
+                    }
+                } catch (err) {
+                    hideBackupProgress();
+                    showAlert(err.response?.data?.detail || '삭제 실패', 'error');
+                }
+            }
+        } catch (error) {
+            hideLoading();
+            showAlert(error.response?.data?.detail || '작업 실패', 'error');
+        }
+        return;
+    }
+
     if (dbManagementAction === 'restore') {
         const instructorName = document.getElementById('db-mgmt-instructor-name').value.trim();
         const password = document.getElementById('db-mgmt-password').value.trim();

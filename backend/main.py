@@ -7750,12 +7750,13 @@ async def create_backup_with_log(request: Request, data: dict):
 
 @app.post("/api/db-management/reset")
 async def reset_database(request: Request, data: dict):
-    """DB 초기화 (백업 후 진행)"""
+    """DB 초기화 (테이블 선택 가능, 백업 후 진행)"""
     import json
     from datetime import datetime, date, timedelta
 
     operator_name = data.get('operator_name', '')
     instructor_code = data.get('instructor_code', '')
+    selected_tables = data.get('tables', [])  # 빈 리스트면 기본 테이블 삭제
 
     if not operator_name:
         raise HTTPException(status_code=400, detail="작업자 정보가 필요합니다")
@@ -7774,12 +7775,26 @@ async def reset_database(request: Request, data: dict):
     try:
         cursor = conn.cursor()
 
-        # 초기화할 테이블 목록 (시스템 설정, 강사 정보, 로그는 유지)
-        tables_to_clear = [
-            'timetables', 'training_logs', 'students',
-            'class_notes', 'consultations', 'notices',
-            'team_activity_logs', 'projects', 'course_subjects'
+        # 삭제 가능한 테이블 목록 (외래키 순서 고려)
+        all_clearable_tables = [
+            'team_activity_logs', 'consultations', 'class_notes', 'training_logs',
+            'timetables', 'notices', 'projects', 'course_subjects', 'students',
+            'instructors', 'subjects', 'courses', 'holidays', 'system_settings'
         ]
+
+        # 기본 초기화 대상 (시스템 설정, 강사 정보, 과목 등은 유지)
+        default_tables = [
+            'team_activity_logs', 'consultations', 'class_notes', 'training_logs',
+            'timetables', 'notices', 'projects', 'course_subjects', 'students'
+        ]
+
+        # 선택된 테이블만 삭제 (빈 리스트면 기본 테이블)
+        tables_to_clear = selected_tables if selected_tables else default_tables
+        # 외래키 순서 유지
+        tables_to_clear = [t for t in all_clearable_tables if t in tables_to_clear]
+
+        is_partial = len(selected_tables) > 0
+        action_desc = f"선택 삭제: {', '.join(tables_to_clear)}" if is_partial else "기본 초기화"
 
         deleted_counts = {}
         for table in tables_to_clear:
@@ -7802,21 +7817,23 @@ async def reset_database(request: Request, data: dict):
             (action_type, operator_name, action_result, backup_file, details, ip_address)
             VALUES (%s, %s, %s, %s, %s, %s)
         """, (
-            'reset',
+            'reset' if not is_partial else 'partial_reset',
             f"{operator_name} ({instructor_code})",
             'success',
             backup_file,
-            f"총 {total_deleted}개 레코드 삭제. 테이블: {', '.join(tables_to_clear)}",
+            f"{action_desc}. 총 {total_deleted}개 레코드 삭제.",
             client_ip
         ))
         conn.commit()
 
         return {
             "success": True,
-            "message": "DB 초기화 완료",
+            "message": "선택 테이블 초기화 완료" if is_partial else "DB 초기화 완료",
             "backup_file": backup_file,
             "deleted_counts": deleted_counts,
-            "total_deleted": total_deleted
+            "deleted_tables": tables_to_clear,
+            "total_deleted": total_deleted,
+            "is_partial": is_partial
         }
 
     except Exception as e:
@@ -7838,13 +7855,14 @@ async def reset_database(request: Request, data: dict):
 
 @app.post("/api/db-management/restore")
 async def restore_database(request: Request, data: dict):
-    """백업 파일에서 DB 복구"""
+    """백업 파일에서 DB 복구 (테이블 선택 가능)"""
     import json
     from datetime import datetime
 
     operator_name = data.get('operator_name', '')
     instructor_code = data.get('instructor_code', '')
     backup_file = data.get('backup_file', '')
+    selected_tables = data.get('tables', [])  # 빈 리스트면 전체 복구
 
     if not operator_name:
         raise HTTPException(status_code=400, detail="작업자 정보가 필요합니다")
@@ -7877,12 +7895,20 @@ async def restore_database(request: Request, data: dict):
         errors = []
 
         # 복구 순서 (외래키 제약조건 고려)
-        restore_order = [
+        all_tables = [
             'system_settings', 'holidays', 'courses', 'subjects', 'instructors',
             'students', 'course_subjects', 'projects', 'timetables',
             'training_logs', 'class_notes', 'consultations', 'notices',
             'team_activity_logs'
         ]
+
+        # 선택된 테이블만 복구 (빈 리스트면 전체)
+        restore_order = selected_tables if selected_tables else all_tables
+        # 전체 테이블 순서 기준으로 정렬 (외래키 순서 유지)
+        restore_order = [t for t in all_tables if t in restore_order]
+
+        is_partial = len(selected_tables) > 0
+        action_desc = f"선택 복구: {', '.join(restore_order)}" if is_partial else "전체 복구"
 
         # 기존 데이터 삭제 (역순으로)
         for table in reversed(restore_order):
@@ -7932,27 +7958,30 @@ async def restore_database(request: Request, data: dict):
         total_restored = sum(restored_counts.values())
 
         # 로그 기록
+        log_details = f"{action_desc}. 총 {total_restored}개 레코드 복구. 복구 전 백업: {pre_restore_backup.get('backup_file', 'N/A')}"
         cursor.execute("""
             INSERT INTO db_management_logs
             (action_type, operator_name, action_result, backup_file, details, ip_address)
             VALUES (%s, %s, %s, %s, %s, %s)
         """, (
-            'restore',
+            'restore' if not is_partial else 'partial_restore',
             f"{operator_name} ({instructor_code})",
             'success',
             backup_file,
-            f"총 {total_restored}개 레코드 복구. 복구 전 백업: {pre_restore_backup.get('backup_file', 'N/A')}",
+            log_details,
             client_ip
         ))
         conn.commit()
 
         return {
             "success": True,
-            "message": "DB 복구 완료",
+            "message": "선택 테이블 복구 완료" if is_partial else "DB 복구 완료",
             "backup_file": backup_file,
             "pre_restore_backup": pre_restore_backup.get('backup_file', ''),
             "restored_counts": restored_counts,
+            "restored_tables": restore_order,
             "total_restored": total_restored,
+            "is_partial": is_partial,
             "errors": errors if errors else None
         }
 
@@ -7969,6 +7998,116 @@ async def restore_database(request: Request, data: dict):
         except:
             pass
         raise HTTPException(status_code=500, detail=f"DB 복구 실패: {str(e)}")
+    finally:
+        conn.close()
+
+
+@app.get("/api/db-management/backup-info/{filename}")
+async def get_backup_info(filename: str):
+    """백업 파일의 테이블 정보 조회"""
+    import json
+
+    backup_dir = '/home/user/webapp/backend/backups'
+    backup_path = f'{backup_dir}/{filename}'
+
+    if not os.path.exists(backup_path):
+        raise HTTPException(status_code=404, detail="백업 파일을 찾을 수 없습니다")
+
+    try:
+        with open(backup_path, 'r', encoding='utf-8') as f:
+            backup_data = json.load(f)
+
+        # 테이블별 정보 (한글 이름 매핑)
+        table_names_kr = {
+            'system_settings': '시스템 설정',
+            'holidays': '공휴일',
+            'courses': '과정',
+            'subjects': '과목',
+            'instructors': '강사',
+            'students': '학생',
+            'course_subjects': '과정-과목 연결',
+            'projects': '프로젝트',
+            'timetables': '시간표',
+            'training_logs': '훈련일지',
+            'class_notes': '수업일지',
+            'consultations': '상담',
+            'notices': '공지사항',
+            'team_activity_logs': '팀활동 로그'
+        }
+
+        tables_info = []
+        for table, rows in backup_data.items():
+            if table == 'db_management_logs':
+                continue
+            if isinstance(rows, list):
+                tables_info.append({
+                    'table': table,
+                    'name_kr': table_names_kr.get(table, table),
+                    'count': len(rows)
+                })
+
+        # 순서 정렬 (외래키 고려)
+        order = ['system_settings', 'holidays', 'courses', 'subjects', 'instructors',
+                 'students', 'course_subjects', 'projects', 'timetables',
+                 'training_logs', 'class_notes', 'consultations', 'notices', 'team_activity_logs']
+        tables_info.sort(key=lambda x: order.index(x['table']) if x['table'] in order else 999)
+
+        return {
+            "filename": filename,
+            "tables": tables_info,
+            "total_records": sum(t['count'] for t in tables_info)
+        }
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="백업 파일 형식이 올바르지 않습니다")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"파일 읽기 실패: {str(e)}")
+
+
+@app.get("/api/db-management/current-tables")
+async def get_current_tables():
+    """현재 DB의 테이블별 레코드 수 조회"""
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+
+        table_names_kr = {
+            'system_settings': '시스템 설정',
+            'holidays': '공휴일',
+            'courses': '과정',
+            'subjects': '과목',
+            'instructors': '강사',
+            'students': '학생',
+            'course_subjects': '과정-과목 연결',
+            'projects': '프로젝트',
+            'timetables': '시간표',
+            'training_logs': '훈련일지',
+            'class_notes': '수업일지',
+            'consultations': '상담',
+            'notices': '공지사항',
+            'team_activity_logs': '팀활동 로그'
+        }
+
+        tables = ['system_settings', 'holidays', 'courses', 'subjects', 'instructors',
+                  'students', 'course_subjects', 'projects', 'timetables',
+                  'training_logs', 'class_notes', 'consultations', 'notices', 'team_activity_logs']
+
+        tables_info = []
+        for table in tables:
+            try:
+                cursor.execute(f"SELECT COUNT(*) FROM {table}")
+                count = cursor.fetchone()[0]
+                tables_info.append({
+                    'table': table,
+                    'name_kr': table_names_kr.get(table, table),
+                    'count': count
+                })
+            except:
+                pass
+
+        return {
+            "tables": tables_info,
+            "total_records": sum(t['count'] for t in tables_info)
+        }
     finally:
         conn.close()
 
