@@ -6575,33 +6575,118 @@ def ensure_notices_table(cursor):
         print(f"[WARN] notices 테이블 생성 실패: {e}")
 
 @app.get("/api/notices")
-async def get_notices(active_only: bool = False):
-    """공지사항 목록 조회"""
+async def get_notices(
+    active_only: bool = False,
+    notice_type: Optional[str] = None,
+    target_code: Optional[str] = None
+):
+    """공지사항 목록 조회 (강사용)"""
     conn = get_db_connection()
     try:
         cursor = conn.cursor(pymysql.cursors.DictCursor)
         ensure_notices_table(cursor)
         conn.commit()
-        
+
+        query = """
+            SELECT n.*,
+                   CASE
+                       WHEN n.notice_type = 'course' THEN c.name
+                       WHEN n.notice_type = 'subject' THEN s.name
+                       ELSE NULL
+                   END as target_name
+            FROM notices n
+            LEFT JOIN courses c ON n.notice_type = 'course' AND n.target_code = c.code
+            LEFT JOIN subjects s ON n.notice_type = 'subject' AND n.target_code = s.code
+            WHERE 1=1
+        """
+        params = []
+
         if active_only:
-            # 현재 활성화된 공지만 조회 (오늘 날짜가 start_date와 end_date 사이)
-            cursor.execute("""
-                SELECT * FROM notices 
-                WHERE CURDATE() BETWEEN start_date AND end_date
-                ORDER BY created_at DESC
-            """)
-        else:
-            # 모든 공지 조회
-            cursor.execute("SELECT * FROM notices ORDER BY created_at DESC")
-        
+            query += " AND CURDATE() BETWEEN n.start_date AND n.end_date"
+
+        if notice_type:
+            query += " AND n.notice_type = %s"
+            params.append(notice_type)
+
+        if target_code:
+            query += " AND n.target_code = %s"
+            params.append(target_code)
+
+        query += " ORDER BY n.created_at DESC"
+
+        cursor.execute(query, params)
         notices = cursor.fetchall()
-        
+
         # datetime 변환
         for notice in notices:
             for key, value in notice.items():
                 if isinstance(value, (datetime, date)):
                     notice[key] = value.isoformat()
-        
+
+        return notices
+    finally:
+        conn.close()
+
+
+@app.get("/api/notices/student/{student_id}")
+async def get_student_notices(student_id: int, active_only: bool = True):
+    """학생용 공지사항 조회 (전체 + 해당 과정 + 수강 중인 교과목)"""
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor(pymysql.cursors.DictCursor)
+
+        # 학생 정보 조회
+        cursor.execute("SELECT course_code FROM students WHERE id = %s", (student_id,))
+        student = cursor.fetchone()
+        if not student:
+            raise HTTPException(status_code=404, detail="학생을 찾을 수 없습니다")
+
+        course_code = student['course_code']
+
+        # 해당 과정의 교과목 코드 조회
+        cursor.execute("""
+            SELECT subject_code FROM course_subjects WHERE course_code = %s
+        """, (course_code,))
+        subject_codes = [row['subject_code'] for row in cursor.fetchall()]
+
+        # 공지 조회: 전체 + 해당 과정 + 수강 중인 교과목
+        query = """
+            SELECT n.*,
+                   CASE
+                       WHEN n.notice_type = 'course' THEN c.name
+                       WHEN n.notice_type = 'subject' THEN s.name
+                       ELSE NULL
+                   END as target_name
+            FROM notices n
+            LEFT JOIN courses c ON n.notice_type = 'course' AND n.target_code = c.code
+            LEFT JOIN subjects s ON n.notice_type = 'subject' AND n.target_code = s.code
+            WHERE (
+                n.notice_type = 'all'
+                OR (n.notice_type = 'course' AND n.target_code = %s)
+        """
+        params = [course_code]
+
+        if subject_codes:
+            placeholders = ','.join(['%s'] * len(subject_codes))
+            query += f" OR (n.notice_type = 'subject' AND n.target_code IN ({placeholders}))"
+            params.extend(subject_codes)
+
+        query += ")"
+
+        if active_only:
+            query += " AND CURDATE() BETWEEN n.start_date AND n.end_date"
+
+        query += " ORDER BY n.created_at DESC"
+
+        cursor.execute(query, params)
+        notices = cursor.fetchall()
+
+        # datetime 변환
+        for notice in notices:
+            for key, value in notice.items():
+                if isinstance(value, (datetime, date)):
+                    notice[key] = value.isoformat()
+
         return notices
     finally:
         conn.close()
@@ -6635,12 +6720,14 @@ async def create_notice(data: dict):
         cursor = conn.cursor()
         ensure_notices_table(cursor)
         conn.commit()
-        
+
         query = """
-            INSERT INTO notices (title, content, start_date, end_date, created_by)
-            VALUES (%s, %s, %s, %s, %s)
+            INSERT INTO notices (notice_type, target_code, title, content, start_date, end_date, created_by)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
         """
         cursor.execute(query, (
+            data.get('notice_type', 'all'),
+            data.get('target_code') if data.get('notice_type') != 'all' else None,
             data['title'],
             data['content'],
             data['start_date'],
@@ -6648,7 +6735,7 @@ async def create_notice(data: dict):
             data.get('created_by')
         ))
         conn.commit()
-        
+
         return {"id": cursor.lastrowid, "success": True, "message": "공지사항이 등록되었습니다"}
     finally:
         conn.close()
@@ -6659,13 +6746,15 @@ async def update_notice(notice_id: int, data: dict):
     conn = get_db_connection()
     try:
         cursor = conn.cursor()
-        
+
         query = """
             UPDATE notices
-            SET title = %s, content = %s, start_date = %s, end_date = %s
+            SET notice_type = %s, target_code = %s, title = %s, content = %s, start_date = %s, end_date = %s
             WHERE id = %s
         """
         cursor.execute(query, (
+            data.get('notice_type', 'all'),
+            data.get('target_code') if data.get('notice_type') != 'all' else None,
             data['title'],
             data['content'],
             data['start_date'],
@@ -6673,10 +6762,10 @@ async def update_notice(notice_id: int, data: dict):
             notice_id
         ))
         conn.commit()
-        
+
         if cursor.rowcount == 0:
             raise HTTPException(status_code=404, detail="공지사항을 찾을 수 없습니다")
-        
+
         return {"success": True, "message": "공지사항이 수정되었습니다"}
     finally:
         conn.close()
@@ -8819,20 +8908,21 @@ async def generate_exam_questions(request: Request):
 {num_questions}개의 {difficulty_text} 객관식 문제를 생성해주세요.
 
 【중요 규칙】
-1. 선택지는 반드시 A) B) C) D) 4개로 고정
-2. 각 문제에 반드시 "참고:" 필드에 출처 문서명 기재
-3. 아래 형식을 정확히 따를 것
+1. 선택지는 반드시 4개, 번호(A,B,C,D) 없이 텍스트만 작성
+2. 정답은 반드시 숫자(1, 2, 3, 4)로 표기
+3. 각 문제에 반드시 "참고:" 필드에 출처 문서명 기재
+4. 아래 형식을 정확히 따를 것
 
 【문제 형식】
 문제 1:
 [문제 내용을 여기에 작성]
 
-A) [선택지 1]
-B) [선택지 2]
-C) [선택지 3]
-D) [선택지 4]
+1) [선택지 1 텍스트만]
+2) [선택지 2 텍스트만]
+3) [선택지 3 텍스트만]
+4) [선택지 4 텍스트만]
 
-정답: [A 또는 B 또는 C 또는 D 중 하나]
+정답: [1 또는 2 또는 3 또는 4 중 하나]
 해설: [왜 이것이 정답인지 설명]
 참고: [출처 문서명, p.페이지번호] (예: 기본간호학.pdf, p.15)
 
@@ -8865,6 +8955,20 @@ D) [선택지 4]
 참고: [출처 문서명, p.페이지번호]
 
 ---
+''',
+            'assignment': f'''
+{num_questions}개의 {difficulty_text} 과제형 문제를 생성해주세요.
+과제형은 학생들이 파일이나 보고서를 제출하는 형태입니다.
+
+【문제 형식】
+문제 1:
+[과제 주제 및 요구사항을 상세히 작성]
+
+제출형식: [보고서/파일/프로젝트 등]
+평가기준: [평가 항목 및 배점]
+참고자료: [참고할 수 있는 문서명]
+
+---
 '''
         }
 
@@ -8877,7 +8981,7 @@ D) [선택지 4]
 【필수 사항】
 - 문제는 제공된 문서 내용을 기반으로 출제
 - 각 문제의 "참고:" 필드에 출처 문서명과 페이지 번호를 반드시 명시 (예: 기본간호학.pdf, p.15)
-- 객관식의 경우 선택지는 A) B) C) D) 4개 고정
+- 객관식의 경우 선택지는 1) 2) 3) 4) 4개 고정, 정답은 숫자로 표기
 """
 
         # 선택된 문서가 있으면 프롬프트에 추가
@@ -9318,6 +9422,1100 @@ async def delete_question(question_id: int):
     except Exception as e:
         print(f"[ERROR] 문제 삭제 실패: {str(e)}")
         raise HTTPException(status_code=500, detail=f"문제 삭제 실패: {str(e)}")
+
+
+# ==================== 온라인 시험 API ====================
+
+@app.get("/api/online-exams")
+async def get_online_exams(
+    course_code: Optional[str] = None,
+    status: Optional[str] = None,
+    instructor_code: Optional[str] = None
+):
+    """온라인 시험 목록 조회"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor(pymysql.cursors.DictCursor)
+
+        query = """
+            SELECT oe.*, eb.exam_name as exam_bank_name, eb.total_questions,
+                   c.name as course_name,
+                   (SELECT COUNT(*) FROM online_exam_participants WHERE online_exam_id = oe.id) as participant_count,
+                   (SELECT COUNT(*) FROM online_exam_participants WHERE online_exam_id = oe.id AND status != 'waiting') as started_count
+            FROM online_exams oe
+            LEFT JOIN exam_bank eb ON oe.exam_bank_id = eb.exam_id
+            LEFT JOIN courses c ON oe.course_code = c.code
+            WHERE 1=1
+        """
+        params = []
+
+        if course_code:
+            query += " AND oe.course_code = %s"
+            params.append(course_code)
+        if status:
+            query += " AND oe.status = %s"
+            params.append(status)
+        if instructor_code:
+            query += " AND oe.instructor_code = %s"
+            params.append(instructor_code)
+
+        query += " ORDER BY oe.created_at DESC"
+
+        cursor.execute(query, params)
+        exams = cursor.fetchall()
+        conn.close()
+
+        return {"success": True, "exams": exams}
+    except Exception as e:
+        print(f"[ERROR] 온라인 시험 목록 조회 실패: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/online-exams")
+async def create_online_exam(request: Request):
+    """온라인 시험/과제 등록"""
+    try:
+        data = await request.json()
+
+        conn = get_db_connection()
+        cursor = conn.cursor(pymysql.cursors.DictCursor)
+
+        # 문제은행 시험 확인
+        cursor.execute("SELECT exam_id, exam_name, total_questions FROM exam_bank WHERE exam_id = %s",
+                      (data.get('exam_bank_id'),))
+        exam_bank = cursor.fetchone()
+        if not exam_bank:
+            raise HTTPException(status_code=404, detail="문제은행 시험을 찾을 수 없습니다")
+
+        exam_type = data.get('exam_type', 'exam')
+        # 과제형은 바로 ongoing 상태로 시작 (deadline까지 제출 가능)
+        initial_status = 'ongoing' if exam_type == 'assignment' else 'scheduled'
+
+        cursor.execute("""
+            INSERT INTO online_exams (title, exam_type, exam_bank_id, course_code, instructor_code,
+                                     duration, scheduled_at, deadline, description, pass_score,
+                                     shuffle_questions, shuffle_options, show_result, status)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """, (
+            data.get('title', exam_bank['exam_name']),
+            exam_type,  # exam, quiz, assignment
+            data.get('exam_bank_id'),
+            data.get('course_code'),
+            data.get('instructor_code'),
+            data.get('duration', 60),
+            data.get('scheduled_at'),
+            data.get('deadline'),  # 과제 마감일
+            data.get('description', ''),
+            data.get('pass_score', 60),
+            data.get('shuffle_questions', 0),
+            data.get('shuffle_options', 0),
+            data.get('show_result', 1),
+            initial_status
+        ))
+
+        exam_id = cursor.lastrowid
+        conn.commit()
+        conn.close()
+
+        type_text = {'exam': '시험', 'quiz': '퀴즈', 'assignment': '과제'}
+        return {
+            "success": True,
+            "message": f"온라인 {type_text.get(exam_type, '시험')}이(가) 등록되었습니다",
+            "exam_id": exam_id
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[ERROR] 온라인 시험 등록 실패: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/online-exams/{exam_id}")
+async def get_online_exam(exam_id: int):
+    """온라인 시험 상세 조회"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor(pymysql.cursors.DictCursor)
+
+        cursor.execute("""
+            SELECT oe.*, eb.exam_name as exam_bank_name, eb.total_questions, eb.subject,
+                   c.name as course_name
+            FROM online_exams oe
+            LEFT JOIN exam_bank eb ON oe.exam_bank_id = eb.exam_id
+            LEFT JOIN courses c ON oe.course_code = c.code
+            WHERE oe.id = %s
+        """, (exam_id,))
+        exam = cursor.fetchone()
+
+        if not exam:
+            raise HTTPException(status_code=404, detail="시험을 찾을 수 없습니다")
+
+        conn.close()
+        return {"success": True, "exam": exam}
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[ERROR] 온라인 시험 조회 실패: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/online-exams/{exam_id}/open-waiting")
+async def open_waiting_room(exam_id: int, request: Request):
+    """대기실 오픈 (강사)"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor(pymysql.cursors.DictCursor)
+
+        cursor.execute("SELECT * FROM online_exams WHERE id = %s", (exam_id,))
+        exam = cursor.fetchone()
+        if not exam:
+            raise HTTPException(status_code=404, detail="시험을 찾을 수 없습니다")
+
+        if exam['status'] not in ['scheduled', 'waiting']:
+            raise HTTPException(status_code=400, detail="이미 시작되었거나 종료된 시험입니다")
+
+        cursor.execute("""
+            UPDATE online_exams SET status = 'waiting' WHERE id = %s
+        """, (exam_id,))
+
+        conn.commit()
+        conn.close()
+
+        return {"success": True, "message": "대기실이 오픈되었습니다"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[ERROR] 대기실 오픈 실패: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/online-exams/{exam_id}/start")
+async def start_online_exam(exam_id: int, request: Request):
+    """시험 시작 (강사)"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor(pymysql.cursors.DictCursor)
+
+        cursor.execute("SELECT * FROM online_exams WHERE id = %s", (exam_id,))
+        exam = cursor.fetchone()
+        if not exam:
+            raise HTTPException(status_code=404, detail="시험을 찾을 수 없습니다")
+
+        if exam['status'] == 'ongoing':
+            raise HTTPException(status_code=400, detail="이미 진행 중인 시험입니다")
+        if exam['status'] == 'ended':
+            raise HTTPException(status_code=400, detail="이미 종료된 시험입니다")
+
+        now = datetime.now()
+        end_time = now + timedelta(minutes=exam['duration'])
+
+        cursor.execute("""
+            UPDATE online_exams
+            SET status = 'ongoing', started_at = %s, ended_at = %s
+            WHERE id = %s
+        """, (now, end_time, exam_id))
+
+        # 대기 중인 모든 응시자 상태 변경
+        cursor.execute("""
+            UPDATE online_exam_participants
+            SET status = 'taking', started_at = %s
+            WHERE online_exam_id = %s AND status = 'waiting'
+        """, (now, exam_id))
+
+        conn.commit()
+        conn.close()
+
+        return {
+            "success": True,
+            "message": "시험이 시작되었습니다",
+            "started_at": now.isoformat(),
+            "ended_at": end_time.isoformat()
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[ERROR] 시험 시작 실패: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/online-exams/{exam_id}/end")
+async def end_online_exam(exam_id: int, request: Request):
+    """시험 종료 (강사) - 강제 종료"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor(pymysql.cursors.DictCursor)
+
+        cursor.execute("SELECT * FROM online_exams WHERE id = %s", (exam_id,))
+        exam = cursor.fetchone()
+        if not exam:
+            raise HTTPException(status_code=404, detail="시험을 찾을 수 없습니다")
+
+        now = datetime.now()
+
+        cursor.execute("""
+            UPDATE online_exams SET status = 'ended', ended_at = %s WHERE id = %s
+        """, (now, exam_id))
+
+        # 미제출 응시자 자동 제출 처리
+        cursor.execute("""
+            UPDATE online_exam_participants
+            SET status = 'submitted', submitted_at = %s
+            WHERE online_exam_id = %s AND status IN ('waiting', 'taking')
+        """, (now, exam_id))
+
+        conn.commit()
+        conn.close()
+
+        return {"success": True, "message": "시험이 종료되었습니다"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[ERROR] 시험 종료 실패: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/online-exams/{exam_id}/enter")
+async def enter_exam_waiting_room(exam_id: int, request: Request):
+    """대기실 입장 (학생)"""
+    try:
+        data = await request.json()
+        student_id = data.get('student_id')
+
+        if not student_id:
+            raise HTTPException(status_code=400, detail="학생 ID가 필요합니다")
+
+        conn = get_db_connection()
+        cursor = conn.cursor(pymysql.cursors.DictCursor)
+
+        # 시험 확인
+        cursor.execute("SELECT * FROM online_exams WHERE id = %s", (exam_id,))
+        exam = cursor.fetchone()
+        if not exam:
+            raise HTTPException(status_code=404, detail="시험을 찾을 수 없습니다")
+
+        if exam['status'] == 'scheduled':
+            raise HTTPException(status_code=400, detail="아직 대기실이 열리지 않았습니다")
+        if exam['status'] == 'ended':
+            raise HTTPException(status_code=400, detail="이미 종료된 시험입니다")
+
+        # 학생 정보 확인
+        cursor.execute("SELECT id, name, course_code FROM students WHERE id = %s", (student_id,))
+        student = cursor.fetchone()
+        if not student:
+            raise HTTPException(status_code=404, detail="학생 정보를 찾을 수 없습니다")
+
+        # 해당 과정 학생인지 확인
+        if student['course_code'] != exam['course_code']:
+            raise HTTPException(status_code=403, detail="해당 과정의 학생만 응시할 수 있습니다")
+
+        now = datetime.now()
+
+        # 이미 입장했는지 확인
+        cursor.execute("""
+            SELECT * FROM online_exam_participants
+            WHERE online_exam_id = %s AND student_id = %s
+        """, (exam_id, student_id))
+        existing = cursor.fetchone()
+
+        if existing:
+            # 이미 입장한 경우
+            if exam['status'] == 'ongoing':
+                # 시험 진행 중이면 재입장 허용 (submitted 상태도 포함)
+                if existing['status'] in ['waiting', 'taking', 'submitted']:
+                    # submitted 상태면 taking으로 변경하여 재응시 허용
+                    if existing['status'] == 'submitted':
+                        cursor.execute("""
+                            UPDATE online_exam_participants
+                            SET status = 'taking'
+                            WHERE id = %s
+                        """, (existing['id'],))
+                        conn.commit()
+                        existing['status'] = 'taking'
+
+                    # 기존 답안도 함께 반환
+                    import json
+                    previous_answers = {}
+                    if existing['answers']:
+                        try:
+                            previous_answers = json.loads(existing['answers'])
+                        except:
+                            pass
+
+                    conn.close()
+                    return {
+                        "success": True,
+                        "message": "시험에 재입장하였습니다" if previous_answers else "시험이 진행 중입니다",
+                        "participant_id": existing['id'],
+                        "exam_status": exam['status'],
+                        "participant_status": existing['status'],
+                        "started_at": exam['started_at'].isoformat() if exam['started_at'] else None,
+                        "ended_at": exam['ended_at'].isoformat() if exam['ended_at'] else None,
+                        "previous_answers": previous_answers
+                    }
+
+            conn.close()
+            return {
+                "success": True,
+                "message": "이미 입장하셨습니다",
+                "participant_id": existing['id'],
+                "exam_status": exam['status'],
+                "participant_status": existing['status']
+            }
+
+        # 새로 입장
+        initial_status = 'taking' if exam['status'] == 'ongoing' else 'waiting'
+        started_at = now if exam['status'] == 'ongoing' else None
+
+        cursor.execute("""
+            INSERT INTO online_exam_participants (online_exam_id, student_id, status, entered_at, started_at)
+            VALUES (%s, %s, %s, %s, %s)
+        """, (exam_id, student_id, initial_status, now, started_at))
+
+        participant_id = cursor.lastrowid
+        conn.commit()
+        conn.close()
+
+        return {
+            "success": True,
+            "message": "대기실에 입장하였습니다" if initial_status == 'waiting' else "시험에 입장하였습니다",
+            "participant_id": participant_id,
+            "exam_status": exam['status'],
+            "participant_status": initial_status,
+            "started_at": exam['started_at'].isoformat() if exam['started_at'] else None,
+            "ended_at": exam['ended_at'].isoformat() if exam['ended_at'] else None
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[ERROR] 대기실 입장 실패: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/online-exams/{exam_id}/questions")
+async def get_exam_questions(exam_id: int, student_id: Optional[int] = None):
+    """시험 문제 조회 (시험 시작 후에만)"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor(pymysql.cursors.DictCursor)
+
+        # 시험 정보 조회
+        cursor.execute("""
+            SELECT oe.*, eb.total_questions
+            FROM online_exams oe
+            LEFT JOIN exam_bank eb ON oe.exam_bank_id = eb.exam_id
+            WHERE oe.id = %s
+        """, (exam_id,))
+        exam = cursor.fetchone()
+
+        if not exam:
+            raise HTTPException(status_code=404, detail="시험을 찾을 수 없습니다")
+
+        if exam['status'] != 'ongoing':
+            raise HTTPException(status_code=400, detail="시험이 진행 중이 아닙니다")
+
+        # 응시자 확인 (학생인 경우) - submitted 상태도 재응시 허용
+        if student_id:
+            cursor.execute("""
+                SELECT * FROM online_exam_participants
+                WHERE online_exam_id = %s AND student_id = %s AND status IN ('waiting', 'taking', 'submitted')
+            """, (exam_id, student_id))
+            participant = cursor.fetchone()
+            if not participant:
+                raise HTTPException(status_code=403, detail="응시 권한이 없습니다")
+
+        # 문제 조회 (정답 제외)
+        cursor.execute("""
+            SELECT question_id, question_number, question_text, question_type,
+                   options, difficulty, points, reference_page, reference_document
+            FROM exam_questions
+            WHERE exam_id = %s
+            ORDER BY question_number
+        """, (exam['exam_bank_id'],))
+        questions = cursor.fetchall()
+
+        # options JSON 파싱
+        import json
+        for q in questions:
+            if q['options']:
+                try:
+                    q['options'] = json.loads(q['options'])
+                except:
+                    q['options'] = []
+
+        conn.close()
+
+        return {
+            "success": True,
+            "exam": {
+                "id": exam['id'],
+                "title": exam['title'],
+                "duration": exam['duration'],
+                "started_at": exam['started_at'].isoformat() if exam['started_at'] else None,
+                "ended_at": exam['ended_at'].isoformat() if exam['ended_at'] else None,
+                "total_questions": exam['total_questions']
+            },
+            "questions": questions
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[ERROR] 시험 문제 조회 실패: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/online-exams/{exam_id}/submit")
+async def submit_exam_answers(exam_id: int, request: Request):
+    """답안 제출 (학생)"""
+    try:
+        data = await request.json()
+        student_id = data.get('student_id')
+        answers = data.get('answers', {})  # {"question_id": "answer", ...}
+
+        if not student_id:
+            raise HTTPException(status_code=400, detail="학생 ID가 필요합니다")
+
+        conn = get_db_connection()
+        cursor = conn.cursor(pymysql.cursors.DictCursor)
+
+        # 시험 확인
+        cursor.execute("SELECT * FROM online_exams WHERE id = %s", (exam_id,))
+        exam = cursor.fetchone()
+        if not exam:
+            raise HTTPException(status_code=404, detail="시험을 찾을 수 없습니다")
+
+        # 응시자 확인
+        cursor.execute("""
+            SELECT * FROM online_exam_participants
+            WHERE online_exam_id = %s AND student_id = %s
+        """, (exam_id, student_id))
+        participant = cursor.fetchone()
+
+        if not participant:
+            raise HTTPException(status_code=404, detail="응시 정보를 찾을 수 없습니다")
+
+        # 시험이 진행 중일 때만 제출/재제출 가능
+        if exam['status'] != 'ongoing':
+            raise HTTPException(status_code=400, detail="시험이 종료되어 제출할 수 없습니다")
+
+        now = datetime.now()
+        import json
+
+        is_resubmit = participant['status'] == 'submitted'
+
+        cursor.execute("""
+            UPDATE online_exam_participants
+            SET status = 'submitted', submitted_at = %s, answers = %s
+            WHERE id = %s
+        """, (now, json.dumps(answers, ensure_ascii=False), participant['id']))
+
+        conn.commit()
+        conn.close()
+
+        return {
+            "success": True,
+            "message": "답안이 재제출되었습니다" if is_resubmit else "답안이 제출되었습니다",
+            "submitted_at": now.isoformat(),
+            "is_resubmit": is_resubmit
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[ERROR] 답안 제출 실패: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/online-exams/{exam_id}/monitor")
+async def monitor_exam(exam_id: int):
+    """시험 모니터링 (강사)"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor(pymysql.cursors.DictCursor)
+
+        # 시험 정보
+        cursor.execute("""
+            SELECT oe.*, eb.exam_name as exam_bank_name, eb.total_questions
+            FROM online_exams oe
+            LEFT JOIN exam_bank eb ON oe.exam_bank_id = eb.exam_id
+            WHERE oe.id = %s
+        """, (exam_id,))
+        exam = cursor.fetchone()
+
+        if not exam:
+            raise HTTPException(status_code=404, detail="시험을 찾을 수 없습니다")
+
+        # 응시자 목록
+        cursor.execute("""
+            SELECT oep.*, s.name as student_name, s.code as student_code
+            FROM online_exam_participants oep
+            LEFT JOIN students s ON oep.student_id = s.id
+            WHERE oep.online_exam_id = %s
+            ORDER BY oep.entered_at
+        """, (exam_id,))
+        participants = cursor.fetchall()
+
+        # 해당 과정 전체 학생 수
+        cursor.execute("""
+            SELECT COUNT(*) as total FROM students WHERE course_code = %s
+        """, (exam['course_code'],))
+        total_students = cursor.fetchone()['total']
+
+        # 통계
+        stats = {
+            "total_students": total_students,
+            "entered_count": len(participants),
+            "waiting_count": sum(1 for p in participants if p['status'] == 'waiting'),
+            "taking_count": sum(1 for p in participants if p['status'] == 'taking'),
+            "submitted_count": sum(1 for p in participants if p['status'] == 'submitted'),
+            "graded_count": sum(1 for p in participants if p['status'] == 'graded')
+        }
+
+        conn.close()
+
+        # 남은 시간 계산
+        remaining_seconds = None
+        if exam['status'] == 'ongoing' and exam['ended_at']:
+            remaining = exam['ended_at'] - datetime.now()
+            remaining_seconds = max(0, int(remaining.total_seconds()))
+
+        return {
+            "success": True,
+            "exam": exam,
+            "participants": participants,
+            "stats": stats,
+            "remaining_seconds": remaining_seconds
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[ERROR] 시험 모니터링 실패: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/online-exams/{exam_id}/status")
+async def get_exam_status(exam_id: int, student_id: Optional[int] = None):
+    """시험 상태 조회 (폴링용)"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor(pymysql.cursors.DictCursor)
+
+        cursor.execute("""
+            SELECT id, status, started_at, ended_at, duration
+            FROM online_exams WHERE id = %s
+        """, (exam_id,))
+        exam = cursor.fetchone()
+
+        if not exam:
+            raise HTTPException(status_code=404, detail="시험을 찾을 수 없습니다")
+
+        # 남은 시간 계산
+        remaining_seconds = None
+        if exam['status'] == 'ongoing' and exam['ended_at']:
+            remaining = exam['ended_at'] - datetime.now()
+            remaining_seconds = max(0, int(remaining.total_seconds()))
+
+            # 시간 초과시 자동 종료
+            if remaining_seconds <= 0:
+                cursor.execute("""
+                    UPDATE online_exams SET status = 'ended' WHERE id = %s AND status = 'ongoing'
+                """, (exam_id,))
+                cursor.execute("""
+                    UPDATE online_exam_participants
+                    SET status = 'submitted', submitted_at = NOW()
+                    WHERE online_exam_id = %s AND status IN ('waiting', 'taking')
+                """, (exam_id,))
+                conn.commit()
+                exam['status'] = 'ended'
+
+        result = {
+            "success": True,
+            "exam_status": exam['status'],
+            "started_at": exam['started_at'].isoformat() if exam['started_at'] else None,
+            "ended_at": exam['ended_at'].isoformat() if exam['ended_at'] else None,
+            "remaining_seconds": remaining_seconds
+        }
+
+        # 학생인 경우 본인 상태도 반환
+        if student_id:
+            cursor.execute("""
+                SELECT status, submitted_at FROM online_exam_participants
+                WHERE online_exam_id = %s AND student_id = %s
+            """, (exam_id, student_id))
+            participant = cursor.fetchone()
+            if participant:
+                result['participant_status'] = participant['status']
+                result['submitted_at'] = participant['submitted_at'].isoformat() if participant['submitted_at'] else None
+
+        conn.close()
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[ERROR] 시험 상태 조회 실패: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/online-exams/{exam_id}/grade")
+async def grade_exam(exam_id: int, request: Request):
+    """자동 채점 (강사)"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor(pymysql.cursors.DictCursor)
+
+        # 시험 정보
+        cursor.execute("""
+            SELECT oe.*, eb.total_questions
+            FROM online_exams oe
+            LEFT JOIN exam_bank eb ON oe.exam_bank_id = eb.exam_id
+            WHERE oe.id = %s
+        """, (exam_id,))
+        exam = cursor.fetchone()
+
+        if not exam:
+            raise HTTPException(status_code=404, detail="시험을 찾을 수 없습니다")
+
+        # 정답 목록 조회
+        cursor.execute("""
+            SELECT question_id, correct_answer, points
+            FROM exam_questions WHERE exam_id = %s
+        """, (exam['exam_bank_id'],))
+        questions = cursor.fetchall()
+
+        answer_key = {str(q['question_id']): q for q in questions}
+        total_points = sum(q['points'] for q in questions)
+
+        # 제출된 응시자 목록
+        cursor.execute("""
+            SELECT * FROM online_exam_participants
+            WHERE online_exam_id = %s AND status = 'submitted'
+        """, (exam_id,))
+        participants = cursor.fetchall()
+
+        import json
+        graded_count = 0
+
+        # 알파벳 <-> 숫자 변환 맵
+        alpha_to_num = {'A': '1', 'B': '2', 'C': '3', 'D': '4', 'E': '5'}
+        num_to_alpha = {'1': 'A', '2': 'B', '3': 'C', '4': 'D', '5': 'E'}
+
+        for p in participants:
+            answers = json.loads(p['answers']) if p['answers'] else {}
+            score = 0
+            correct_count = 0
+
+            for qid, q_info in answer_key.items():
+                student_answer = str(answers.get(qid, '')).strip()
+                correct_answer = str(q_info['correct_answer']).strip()
+
+                # 학생 답안을 숫자로 정규화 (1, 2, 3, 4)
+                student_num = student_answer
+                if student_answer.upper() in alpha_to_num:
+                    student_num = alpha_to_num[student_answer.upper()]
+
+                # 정답을 숫자로 정규화
+                # 케이스1: "3" (새로운 형식)
+                # 케이스2: "C) 데이터의 윤리적 사용" (기존 형식)
+                # 케이스3: "C" (알파벳만)
+                correct_num = ''
+                if correct_answer and correct_answer[0].isdigit():
+                    correct_num = correct_answer[0]
+                elif correct_answer and correct_answer[0].upper() in alpha_to_num:
+                    correct_num = alpha_to_num[correct_answer[0].upper()]
+
+                if student_num == correct_num:
+                    score += q_info['points']
+                    correct_count += 1
+
+            # 100점 만점으로 환산
+            final_score = round((score / total_points) * 100) if total_points > 0 else 0
+            is_passed = 1 if final_score >= exam['pass_score'] else 0
+
+            cursor.execute("""
+                UPDATE online_exam_participants
+                SET status = 'graded', score = %s, correct_count = %s,
+                    total_questions = %s, is_passed = %s, graded_at = NOW()
+                WHERE id = %s
+            """, (final_score, correct_count, len(questions), is_passed, p['id']))
+            graded_count += 1
+
+        # 시험 상태 업데이트
+        cursor.execute("UPDATE online_exams SET status = 'graded' WHERE id = %s", (exam_id,))
+
+        conn.commit()
+        conn.close()
+
+        return {
+            "success": True,
+            "message": f"{graded_count}명의 답안이 채점되었습니다",
+            "graded_count": graded_count
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[ERROR] 채점 실패: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/online-exams/{exam_id}/results")
+async def get_exam_results(exam_id: int):
+    """시험 결과 조회 (강사)"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor(pymysql.cursors.DictCursor)
+
+        # 시험 정보
+        cursor.execute("""
+            SELECT oe.*, eb.exam_name as exam_bank_name, eb.total_questions
+            FROM online_exams oe
+            LEFT JOIN exam_bank eb ON oe.exam_bank_id = eb.exam_id
+            WHERE oe.id = %s
+        """, (exam_id,))
+        exam = cursor.fetchone()
+
+        if not exam:
+            raise HTTPException(status_code=404, detail="시험을 찾을 수 없습니다")
+
+        # 채점된 응시자 목록 (제출시간 순으로 정렬하여 순위 부여)
+        cursor.execute("""
+            SELECT oep.*, s.name as student_name, s.code as student_code
+            FROM online_exam_participants oep
+            LEFT JOIN students s ON oep.student_id = s.id
+            WHERE oep.online_exam_id = %s AND oep.status = 'graded'
+            ORDER BY oep.submitted_at ASC
+        """, (exam_id,))
+        results = cursor.fetchall()
+
+        # 퀴즈인 경우 제출 순서 순위 및 전부 정답 여부 추가
+        if exam.get('exam_type') == 'quiz':
+            rank = 1
+            for r in results:
+                # 전부 정답인지 확인
+                r['is_all_correct'] = (r['correct_count'] == r['total_questions']) if r['total_questions'] else False
+                if r['is_all_correct']:
+                    r['rank'] = rank
+                    rank += 1
+                else:
+                    r['rank'] = None  # 오답자는 순위 없음
+
+        # 통계
+        if results:
+            scores = [r['score'] for r in results]
+            stats = {
+                "total_count": len(results),
+                "average_score": round(sum(scores) / len(scores), 1),
+                "max_score": max(scores),
+                "min_score": min(scores),
+                "pass_count": sum(1 for r in results if r['is_passed']),
+                "fail_count": sum(1 for r in results if not r['is_passed'])
+            }
+        else:
+            stats = {
+                "total_count": 0, "average_score": 0, "max_score": 0,
+                "min_score": 0, "pass_count": 0, "fail_count": 0
+            }
+
+        conn.close()
+
+        return {
+            "success": True,
+            "exam": exam,
+            "results": results,
+            "stats": stats
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[ERROR] 시험 결과 조회 실패: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/api/online-exams/{exam_id}")
+async def delete_online_exam(exam_id: int):
+    """온라인 시험 삭제"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor(pymysql.cursors.DictCursor)
+
+        cursor.execute("SELECT * FROM online_exams WHERE id = %s", (exam_id,))
+        exam = cursor.fetchone()
+        if not exam:
+            raise HTTPException(status_code=404, detail="시험을 찾을 수 없습니다")
+
+        if exam['status'] == 'ongoing':
+            raise HTTPException(status_code=400, detail="진행 중인 시험은 삭제할 수 없습니다")
+
+        cursor.execute("DELETE FROM online_exams WHERE id = %s", (exam_id,))
+        conn.commit()
+        conn.close()
+
+        return {"success": True, "message": "시험이 삭제되었습니다"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[ERROR] 시험 삭제 실패: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/online-exams/{exam_id}/submit-assignment")
+async def submit_assignment(exam_id: int, student_id: int = Form(...), file: UploadFile = File(None), answer_text: str = Form(None)):
+    """과제 제출 (파일 첨부 또는 텍스트)"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor(pymysql.cursors.DictCursor)
+
+        # 시험(과제) 확인
+        cursor.execute("SELECT * FROM online_exams WHERE id = %s", (exam_id,))
+        exam = cursor.fetchone()
+        if not exam:
+            raise HTTPException(status_code=404, detail="과제를 찾을 수 없습니다")
+
+        if exam['exam_type'] != 'assignment':
+            raise HTTPException(status_code=400, detail="과제형이 아닙니다")
+
+        # 마감일 확인
+        now = datetime.now()
+        if exam['deadline'] and now > exam['deadline']:
+            raise HTTPException(status_code=400, detail="제출 기한이 지났습니다")
+
+        # 응시자 정보 확인/생성
+        cursor.execute("""
+            SELECT * FROM online_exam_participants
+            WHERE online_exam_id = %s AND student_id = %s
+        """, (exam_id, student_id))
+        participant = cursor.fetchone()
+
+        file_path = None
+        file_name = None
+
+        # 파일 업로드 처리
+        if file and file.filename:
+            import os
+            upload_dir = "/usr/miniLMS/uploads/assignments"
+            os.makedirs(upload_dir, exist_ok=True)
+
+            # 파일명 생성 (exam_id_student_id_timestamp_원본파일명)
+            timestamp = now.strftime("%Y%m%d_%H%M%S")
+            safe_filename = file.filename.replace(" ", "_")
+            file_name = f"{exam_id}_{student_id}_{timestamp}_{safe_filename}"
+            file_path = os.path.join(upload_dir, file_name)
+
+            # 파일 저장
+            content = await file.read()
+            with open(file_path, "wb") as f:
+                f.write(content)
+
+        # 답안 데이터 (텍스트 또는 파일 정보)
+        import json
+        answers = {}
+        if answer_text:
+            answers = {"text": answer_text}
+
+        if participant:
+            # 기존 제출 수정
+            cursor.execute("""
+                UPDATE online_exam_participants
+                SET status = 'submitted', submitted_at = %s, answers = %s,
+                    file_path = COALESCE(%s, file_path), file_name = COALESCE(%s, file_name)
+                WHERE id = %s
+            """, (now, json.dumps(answers, ensure_ascii=False) if answers else None,
+                  file_path, file_name, participant['id']))
+            is_resubmit = True
+        else:
+            # 새로 제출
+            cursor.execute("""
+                INSERT INTO online_exam_participants
+                (online_exam_id, student_id, status, entered_at, submitted_at, answers, file_path, file_name)
+                VALUES (%s, %s, 'submitted', %s, %s, %s, %s, %s)
+            """, (exam_id, student_id, now, now,
+                  json.dumps(answers, ensure_ascii=False) if answers else None,
+                  file_path, file_name))
+            is_resubmit = False
+
+        conn.commit()
+        conn.close()
+
+        return {
+            "success": True,
+            "message": "과제가 재제출되었습니다" if is_resubmit else "과제가 제출되었습니다",
+            "submitted_at": now.isoformat(),
+            "file_name": file_name,
+            "is_resubmit": is_resubmit
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[ERROR] 과제 제출 실패: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/online-exams/{exam_id}/assignment-status")
+async def get_assignment_status(exam_id: int, student_id: int):
+    """과제 제출 상태 조회"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor(pymysql.cursors.DictCursor)
+
+        # 과제 정보
+        cursor.execute("""
+            SELECT oe.*, eb.exam_name as exam_bank_name
+            FROM online_exams oe
+            LEFT JOIN exam_bank eb ON oe.exam_bank_id = eb.exam_id
+            WHERE oe.id = %s
+        """, (exam_id,))
+        exam = cursor.fetchone()
+
+        if not exam:
+            raise HTTPException(status_code=404, detail="과제를 찾을 수 없습니다")
+
+        # 학생 제출 정보
+        cursor.execute("""
+            SELECT * FROM online_exam_participants
+            WHERE online_exam_id = %s AND student_id = %s
+        """, (exam_id, student_id))
+        submission = cursor.fetchone()
+
+        conn.close()
+
+        # 남은 시간 계산
+        remaining_seconds = None
+        if exam['deadline']:
+            remaining = exam['deadline'] - datetime.now()
+            remaining_seconds = max(0, int(remaining.total_seconds()))
+
+        return {
+            "success": True,
+            "exam": {
+                "id": exam['id'],
+                "title": exam['title'],
+                "deadline": exam['deadline'].isoformat() if exam['deadline'] else None,
+                "description": exam['description']
+            },
+            "submission": {
+                "submitted": submission is not None,
+                "submitted_at": submission['submitted_at'].isoformat() if submission and submission['submitted_at'] else None,
+                "file_name": submission['file_name'] if submission else None,
+                "answers": submission['answers'] if submission else None
+            } if submission else None,
+            "remaining_seconds": remaining_seconds,
+            "is_expired": remaining_seconds == 0 if remaining_seconds is not None else False
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[ERROR] 과제 상태 조회 실패: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/assignments/download/{filename}")
+async def download_assignment(filename: str):
+    """과제 파일 다운로드"""
+    from fastapi.responses import FileResponse
+    import os
+
+    file_path = os.path.join("/usr/miniLMS/uploads/assignments", filename)
+
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="파일을 찾을 수 없습니다")
+
+    # 원본 파일명 추출 (exam_id_student_id_timestamp_원본파일명)
+    parts = filename.split("_", 3)
+    original_name = parts[3] if len(parts) > 3 else filename
+
+    return FileResponse(
+        file_path,
+        filename=original_name,
+        media_type="application/octet-stream"
+    )
+
+
+@app.post("/api/online-exams/{exam_id}/grade-assignment")
+async def grade_assignment(exam_id: int, request: Request):
+    """과제 수동 채점 (강사)"""
+    try:
+        data = await request.json()
+        participant_id = data.get('participant_id')
+        score = data.get('score')
+        feedback = data.get('feedback', '')
+
+        if participant_id is None or score is None:
+            raise HTTPException(status_code=400, detail="participant_id와 score가 필요합니다")
+
+        conn = get_db_connection()
+        cursor = conn.cursor(pymysql.cursors.DictCursor)
+
+        # 과제 확인
+        cursor.execute("""
+            SELECT exam_type FROM online_exams WHERE id = %s
+        """, (exam_id,))
+        exam = cursor.fetchone()
+        if not exam:
+            raise HTTPException(status_code=404, detail="과제를 찾을 수 없습니다")
+
+        # 점수 업데이트
+        cursor.execute("""
+            UPDATE online_exam_participants
+            SET score = %s, status = 'graded', feedback = %s
+            WHERE id = %s AND online_exam_id = %s
+        """, (score, feedback, participant_id, exam_id))
+
+        conn.commit()
+        conn.close()
+
+        return {
+            "success": True,
+            "message": "점수가 저장되었습니다"
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[ERROR] 과제 채점 실패: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/online-exams/{exam_id}/grade-all-assignments")
+async def grade_all_assignments(exam_id: int, request: Request):
+    """모든 과제 일괄 채점 (강사)"""
+    try:
+        data = await request.json()
+        grades = data.get('grades', [])  # [{participant_id, score, feedback}, ...]
+
+        if not grades:
+            raise HTTPException(status_code=400, detail="채점 데이터가 필요합니다")
+
+        conn = get_db_connection()
+        cursor = conn.cursor(pymysql.cursors.DictCursor)
+
+        graded_count = 0
+        for grade in grades:
+            cursor.execute("""
+                UPDATE online_exam_participants
+                SET score = %s, status = 'graded', feedback = %s
+                WHERE id = %s AND online_exam_id = %s
+            """, (grade.get('score', 0), grade.get('feedback', ''), grade['participant_id'], exam_id))
+            graded_count += cursor.rowcount
+
+        # 모든 과제가 채점되었는지 확인하고 상태 업데이트
+        cursor.execute("""
+            SELECT COUNT(*) as total, SUM(CASE WHEN status = 'graded' THEN 1 ELSE 0 END) as graded
+            FROM online_exam_participants WHERE online_exam_id = %s
+        """, (exam_id,))
+        result = cursor.fetchone()
+
+        if result['total'] > 0 and result['total'] == result['graded']:
+            cursor.execute("UPDATE online_exams SET status = 'graded' WHERE id = %s", (exam_id,))
+
+        conn.commit()
+        conn.close()
+
+        return {
+            "success": True,
+            "message": f"{graded_count}명의 과제가 채점되었습니다",
+            "graded_count": graded_count
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[ERROR] 일괄 채점 실패: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # ====================문서 관리 API====================

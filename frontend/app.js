@@ -1404,23 +1404,59 @@ window.debouncedFilterCounselings = debounce(() => {
 }, 500);
 
 // ==================== 로딩 오버레이 ====================
-window.showLoading = function(message = '데이터를 불러오는 중...') {
+window.showLoading = function(message = '데이터를 불러오는 중...', isAI = false) {
     const overlay = document.getElementById('loading-overlay');
     const messageEl = document.getElementById('loading-message');
     const progressEl = document.getElementById('loading-progress');
-    
+
+    // AI 모드일 때 특별한 애니메이션 표시
+    const iconContainer = overlay.querySelector('.text-center > .mb-4');
+    const titleEl = overlay.querySelector('h3');
+    const subtitleEl = overlay.querySelector('p.text-gray-600');
+
+    if (isAI) {
+        iconContainer.innerHTML = `
+            <div class="relative inline-block">
+                <i class="fas fa-robot text-5xl text-purple-600 animate-bounce"></i>
+                <div class="absolute -top-1 -right-1">
+                    <span class="flex h-4 w-4">
+                        <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-purple-400 opacity-75"></span>
+                        <span class="relative inline-flex rounded-full h-4 w-4 bg-purple-500"></span>
+                    </span>
+                </div>
+            </div>
+        `;
+        titleEl.innerHTML = '<i class="fas fa-brain text-purple-600 mr-2"></i>AI가 열심히 생각하는 중...';
+        subtitleEl.innerHTML = '잠시만 기다려주세요. AI가 최선의 결과를 만들고 있습니다.';
+        overlay.dataset.isAI = 'true';
+    } else {
+        iconContainer.innerHTML = '<i class="fas fa-spinner fa-spin text-5xl text-blue-600"></i>';
+        titleEl.textContent = '데이터 로딩 중';
+        subtitleEl.textContent = '잠시만 기다려주세요...';
+        overlay.dataset.isAI = 'false';
+    }
+
     messageEl.textContent = message;
     progressEl.style.width = '0%';
     overlay.classList.remove('hidden');
-    
+
     // 프로그레스 바 애니메이션
     let progress = 0;
     const interval = setInterval(() => {
-        progress += Math.random() * 15;
+        progress += Math.random() * (isAI ? 5 : 15);  // AI는 더 천천히
         if (progress > 90) progress = 90;
         progressEl.style.width = progress + '%';
-    }, 200);
-    
+
+        // AI 모드: 메시지 변경
+        if (isAI && progress > 30 && progress < 60) {
+            messageEl.textContent = '📝 문제를 구성하는 중...';
+        } else if (isAI && progress >= 60 && progress < 80) {
+            messageEl.textContent = '✨ 최종 검토 중...';
+        } else if (isAI && progress >= 80) {
+            messageEl.textContent = '🎯 거의 완료되었습니다...';
+        }
+    }, isAI ? 500 : 200);
+
     // interval ID 저장
     overlay.dataset.intervalId = interval;
 };
@@ -3205,6 +3241,15 @@ async function loadStudents() {
     }
 }
 
+// 학생 검색 디바운스 (타이핑 완료 후 300ms 후 검색)
+let studentSearchTimer = null;
+window.debounceStudentSearch = function() {
+    if (studentSearchTimer) clearTimeout(studentSearchTimer);
+    studentSearchTimer = setTimeout(() => {
+        renderStudents();
+    }, 300);
+};
+
 function renderStudents() {
     // 현재 필터 상태 저장
     const previousCourseFilter = document.getElementById('student-course-filter')?.value || '';
@@ -3257,7 +3302,7 @@ function renderStudents() {
                 </div>
                 <div>
                     <label class="block text-gray-700 mb-2">검색 (이름, 학생코드)</label>
-                    <input type="text" id="student-search" placeholder="검색어 입력..." value="${previousSearch}" class="w-full border rounded px-3 py-2" onkeyup="window.renderStudents()">
+                    <input type="text" id="student-search" placeholder="검색어 입력..." value="${previousSearch}" class="w-full border rounded px-3 py-2" oninput="window.debounceStudentSearch()">
                 </div>
             </div>
             
@@ -6691,7 +6736,7 @@ function renderInstructors() {
                 </div>
                 <div>
                     <label class="block text-gray-700 mb-2">검색 (이름, 전공)</label>
-                    <input type="text" id="instructor-search" placeholder="검색어 입력..." class="w-full border rounded px-3 py-2" onkeyup="window.filterInstructors()" autocomplete="off" autocomplete="new-password" readonly onfocus="this.removeAttribute('readonly');">
+                    <input type="text" id="instructor-search" placeholder="검색어 입력..." class="w-full border rounded px-3 py-2" oninput="window.debounceInstructorSearch()" autocomplete="off" autocomplete="new-password" readonly onfocus="this.removeAttribute('readonly');">
                 </div>
             </div>
             
@@ -6842,6 +6887,15 @@ function renderInstructors() {
     setTimeout(clearSearchField, 50);
     setTimeout(clearSearchField, 100);
 }
+
+// 강사 검색 디바운스 (타이핑 완료 후 300ms 후 검색)
+let instructorSearchTimer = null;
+window.debounceInstructorSearch = function() {
+    if (instructorSearchTimer) clearTimeout(instructorSearchTimer);
+    instructorSearchTimer = setTimeout(() => {
+        window.filterInstructors();
+    }, 300);
+};
 
 window.filterInstructors = async function() {
     const search = document.getElementById('instructor-search').value.toLowerCase();
@@ -15449,10 +15503,31 @@ async function clearVectorDB() {
     }
 }
 
-function renderNotices() {
+async function renderNotices() {
     const today = new Date().toISOString().split('T')[0];
     const app = document.getElementById('app');
-    
+
+    // 과정 및 교과목 목록 로드
+    let courses = [];
+    let subjects = [];
+    try {
+        const [coursesRes, subjectsRes] = await Promise.all([
+            axios.get(`${API_BASE_URL}/api/courses`),
+            axios.get(`${API_BASE_URL}/api/subjects`)
+        ]);
+        courses = coursesRes.data || [];
+        subjects = subjectsRes.data || [];
+    } catch (e) {
+        console.error('과정/교과목 목록 로드 실패:', e);
+    }
+
+    // 공지 유형별 라벨과 색상
+    const typeLabels = {
+        'all': { text: '전체', color: 'bg-blue-100 text-blue-700', icon: 'fa-globe' },
+        'course': { text: '과정', color: 'bg-green-100 text-green-700', icon: 'fa-users' },
+        'subject': { text: '교과목', color: 'bg-purple-100 text-purple-700', icon: 'fa-book' }
+    };
+
     app.innerHTML = `
         <div class="bg-white rounded-lg shadow-md p-6">
             <div class="flex justify-between items-center mb-6">
@@ -15463,18 +15538,42 @@ function renderNotices() {
                     <i class="fas fa-plus mr-2"></i>공지사항 추가
                 </button>
             </div>
-            
+
             <!-- 공지사항 폼 (숨김) -->
             <div id="notice-form" class="hidden bg-gray-50 rounded-lg p-6 mb-6">
                 <h3 class="text-lg font-semibold mb-4" id="form-title">공지사항 추가</h3>
                 <form id="notice-save-form">
                     <input type="hidden" id="edit-notice-id">
-                    
+
+                    <!-- 공지 유형 선택 -->
+                    <div class="mb-4">
+                        <label class="block text-gray-700 mb-2">공지 대상 *</label>
+                        <div class="flex gap-4 mb-3">
+                            <label class="flex items-center cursor-pointer">
+                                <input type="radio" name="notice-type" value="all" checked onchange="toggleNoticeTarget()" class="mr-2">
+                                <span class="px-3 py-1 rounded-full bg-blue-100 text-blue-700 text-sm"><i class="fas fa-globe mr-1"></i>전체 공지</span>
+                            </label>
+                            <label class="flex items-center cursor-pointer">
+                                <input type="radio" name="notice-type" value="course" onchange="toggleNoticeTarget()" class="mr-2">
+                                <span class="px-3 py-1 rounded-full bg-green-100 text-green-700 text-sm"><i class="fas fa-users mr-1"></i>과정별</span>
+                            </label>
+                            <label class="flex items-center cursor-pointer">
+                                <input type="radio" name="notice-type" value="subject" onchange="toggleNoticeTarget()" class="mr-2">
+                                <span class="px-3 py-1 rounded-full bg-purple-100 text-purple-700 text-sm"><i class="fas fa-book mr-1"></i>교과목별</span>
+                            </label>
+                        </div>
+                        <div id="target-select-container" class="hidden">
+                            <select id="notice-target" class="w-full border rounded px-3 py-2">
+                                <option value="">대상을 선택하세요</option>
+                            </select>
+                        </div>
+                    </div>
+
                     <div class="mb-4">
                         <label class="block text-gray-700 mb-2">제목 *</label>
                         <input type="text" id="notice-title" class="w-full border rounded px-3 py-2" required>
                     </div>
-                    
+
                     <div class="grid grid-cols-2 gap-4 mb-4">
                         <div>
                             <label class="block text-gray-700 mb-2">게시 시작일 *</label>
@@ -15485,10 +15584,10 @@ function renderNotices() {
                             <input type="date" id="notice-end-date" class="w-full border rounded px-3 py-2" required>
                         </div>
                     </div>
-                    
+
                     <div class="mb-4">
                         <label class="block text-gray-700 mb-2">
-                            내용 * 
+                            내용 *
                             <span class="text-sm text-gray-500">(마크다운 지원, 이미지 URL 포함 가능)</span>
                         </label>
                         <textarea id="notice-content" rows="10" class="w-full border rounded px-3 py-2 font-mono" placeholder="# 제목&#10;&#10;내용을 작성하세요...&#10;&#10;- 마크다운 문법 사용 가능&#10;- 이미지: ![설명](이미지URL)&#10;- 링크: [텍스트](URL)" required></textarea>
@@ -15499,7 +15598,7 @@ function renderNotices() {
                             - 목록1, - 목록2
                         </div>
                     </div>
-                    
+
                     <div class="flex gap-2">
                         <button type="button" onclick="saveNotice()" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg">
                             <i class="fas fa-save mr-2"></i>저장
@@ -15510,7 +15609,7 @@ function renderNotices() {
                     </div>
                 </form>
             </div>
-            
+
             <!-- 공지사항 목록 -->
             <div class="space-y-4">
                 ${notices.length === 0 ? `
@@ -15523,13 +15622,17 @@ function renderNotices() {
                     const statusColor = isActive ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-600';
                     const statusIcon = isActive ? 'fa-check-circle' : 'fa-clock';
                     const statusText = isActive ? '게시중' : today < notice.start_date ? '게시 예정' : '종료';
-                    
+                    const typeInfo = typeLabels[notice.notice_type || 'all'];
+
                     return `
                         <div class="border rounded-lg p-4 hover:shadow-md transition-shadow ${isActive ? 'border-green-300' : ''}">
                             <div class="flex justify-between items-start">
                                 <div class="flex-1">
-                                    <div class="flex items-center gap-2 mb-2">
-                                        <span class="px-3 py-1 rounded-full text-xs font-semibold ${statusColor}">
+                                    <div class="flex items-center gap-2 mb-2 flex-wrap">
+                                        <span class="px-2 py-1 rounded-full text-xs font-semibold ${typeInfo.color}">
+                                            <i class="fas ${typeInfo.icon} mr-1"></i>${typeInfo.text}${notice.target_name ? `: ${notice.target_name}` : ''}
+                                        </span>
+                                        <span class="px-2 py-1 rounded-full text-xs font-semibold ${statusColor}">
                                             <i class="fas ${statusIcon} mr-1"></i>${statusText}
                                         </span>
                                         <h3 class="text-lg font-bold text-gray-800">${notice.title}</h3>
@@ -15561,12 +15664,42 @@ function renderNotices() {
             </div>
         </div>
     `;
+
+    // 과정/교과목 데이터를 전역으로 저장
+    window.noticeCoursesData = courses;
+    window.noticeSubjectsData = subjects;
 }
+
+// 공지 대상 토글
+window.toggleNoticeTarget = function() {
+    const noticeType = document.querySelector('input[name="notice-type"]:checked')?.value || 'all';
+    const container = document.getElementById('target-select-container');
+    const select = document.getElementById('notice-target');
+
+    if (noticeType === 'all') {
+        container.classList.add('hidden');
+        select.innerHTML = '<option value="">대상을 선택하세요</option>';
+    } else {
+        container.classList.remove('hidden');
+        let options = '<option value="">대상을 선택하세요</option>';
+
+        if (noticeType === 'course') {
+            (window.noticeCoursesData || []).forEach(c => {
+                options += `<option value="${c.code}">${c.name}</option>`;
+            });
+        } else if (noticeType === 'subject') {
+            (window.noticeSubjectsData || []).forEach(s => {
+                options += `<option value="${s.code}">${s.name}</option>`;
+            });
+        }
+        select.innerHTML = options;
+    }
+};
 
 window.showNoticeForm = function(noticeId = null) {
     const formDiv = document.getElementById('notice-form');
     const formTitle = document.getElementById('form-title');
-    
+
     if (noticeId) {
         formTitle.textContent = '공지사항 수정';
         const notice = notices.find(n => n.id === noticeId);
@@ -15576,11 +15709,26 @@ window.showNoticeForm = function(noticeId = null) {
             document.getElementById('notice-content').value = notice.content;
             document.getElementById('notice-start-date').value = notice.start_date;
             document.getElementById('notice-end-date').value = notice.end_date;
+
+            // 공지 유형 설정
+            const noticeType = notice.notice_type || 'all';
+            document.querySelector(`input[name="notice-type"][value="${noticeType}"]`).checked = true;
+            toggleNoticeTarget();
+
+            // 대상 선택
+            if (notice.target_code) {
+                setTimeout(() => {
+                    document.getElementById('notice-target').value = notice.target_code;
+                }, 100);
+            }
         }
     } else {
         formTitle.textContent = '공지사항 추가';
         document.getElementById('notice-save-form').reset();
         document.getElementById('edit-notice-id').value = '';
+        document.querySelector('input[name="notice-type"][value="all"]').checked = true;
+        toggleNoticeTarget();
+
         // 기본값: 오늘부터 30일간
         const today = new Date();
         const endDate = new Date(today);
@@ -15588,7 +15736,7 @@ window.showNoticeForm = function(noticeId = null) {
         document.getElementById('notice-start-date').value = today.toISOString().split('T')[0];
         document.getElementById('notice-end-date').value = endDate.toISOString().split('T')[0];
     }
-    
+
     formDiv.classList.remove('hidden');
     formDiv.scrollIntoView({ behavior: 'smooth' });
     window.disableFilters(); // 필터 비활성화
@@ -15601,50 +15749,60 @@ window.hideNoticeForm = function() {
 
 window.saveNotice = async function() {
     const noticeId = document.getElementById('edit-notice-id').value;
+    const noticeType = document.querySelector('input[name="notice-type"]:checked')?.value || 'all';
+    const targetCode = document.getElementById('notice-target')?.value || null;
     const title = document.getElementById('notice-title').value;
     const content = document.getElementById('notice-content').value;
     const startDate = document.getElementById('notice-start-date').value;
     const endDate = document.getElementById('notice-end-date').value;
-    
+
     // 필수 입력 검증
+    if (noticeType !== 'all' && !targetCode) {
+        await window.showError('공지 대상을 선택해주세요.', '필수 항목 누락');
+        document.getElementById('notice-target').focus();
+        return;
+    }
+
     if (!title.trim()) {
         await window.showError('제목을 입력해주세요.', '필수 항목 누락');
         document.getElementById('notice-title').focus();
         return;
     }
-    
+
     if (!content.trim()) {
         await window.showError('내용을 입력해주세요.', '필수 항목 누락');
         document.getElementById('notice-content').focus();
         return;
     }
-    
+
     if (!startDate) {
         await window.showError('게시 시작일을 입력해주세요.', '필수 항목 누락');
         document.getElementById('notice-start-date').focus();
         return;
     }
-    
+
     if (!endDate) {
         await window.showError('게시 종료일을 입력해주세요.', '필수 항목 누락');
         document.getElementById('notice-end-date').focus();
         return;
     }
-    
+
     if (startDate > endDate) {
         await window.showError('종료일은 시작일 이후여야 합니다.', '날짜 오류');
         return;
     }
-    
+
     const instructor = JSON.parse(sessionStorage.getItem('instructor'));
     const data = {
+        notice_type: noticeType,
+        target_code: noticeType !== 'all' ? targetCode : null,
         title: title.trim(),
         content: content.trim(),
         start_date: startDate,
         end_date: endDate,
         created_by: instructor?.name || null
     };
-    
+
     try {
         if (noticeId) {
             await axios.put(`${API_BASE_URL}/api/notices/${noticeId}`, data);
@@ -15653,7 +15811,7 @@ window.saveNotice = async function() {
             await axios.post(`${API_BASE_URL}/api/notices`, data);
             await window.showSuccess('공지사항이 등록되었습니다.', '저장 완료');
         }
-        
+
         hideNoticeForm();
         loadNotices();
     } catch (error) {
@@ -22500,8 +22658,8 @@ async function showExamGenerateForm() {
                                class="w-full border rounded px-3 py-2">
                     </div>
                     <div>
-                        <label class="block text-gray-700 font-semibold mb-2">시험시간(분) *</label>
-                        <input type="number" name="exam_duration" required min="10" max="180" value="60"
+                        <label class="block text-gray-700 font-semibold mb-2">시험시간(분)</label>
+                        <input type="number" name="exam_duration" min="1" max="180" value="60"
                                class="w-full border rounded px-3 py-2">
                     </div>
                     <div>
@@ -22510,6 +22668,7 @@ async function showExamGenerateForm() {
                             <option value="multiple_choice">객관식</option>
                             <option value="short_answer">단답형</option>
                             <option value="essay">서술형</option>
+                            <option value="assignment">과제형</option>
                         </select>
                     </div>
                     <div>
@@ -22658,7 +22817,7 @@ async function generateExamQuestions(form) {
     data.instructor_code = instructor.code || '';
 
     try {
-        window.showLoading(`RAG 시스템으로 문제 생성 중... (${selectedDocs.length}개 문서 참고)`);
+        window.showLoading(`🤖 AI가 문제를 생성하는 중... (${selectedDocs.length}개 문서 참고)`, true);
 
         const response = await axios.post(`${API_BASE_URL}/api/exam-bank/generate`, data);
 
@@ -22760,12 +22919,44 @@ function parseQuestionsText(text, questionType) {
     const questions = [];
     const lines = text.split('\n');
     let currentQuestion = null;
-    
+
+    // 한 줄에 여러 선택지가 있는 경우 분리하는 함수
+    function extractOptionsFromLine(line) {
+        const options = [];
+        // 1) ... 2) ... 3) ... 4) ... 또는 A) ... B) ... 패턴 찾기
+        const optionMatches = line.match(/[1-4A-D]\)\s*[^1-4A-D)]+/g);
+        if (optionMatches && optionMatches.length >= 2) {
+            optionMatches.forEach(match => {
+                const optText = match.replace(/^[1-4A-D]\)\s*/, '').trim();
+                if (optText) options.push(optText);
+            });
+        }
+        return options;
+    }
+
+    // 문제 텍스트에서 선택지 부분 분리
+    function separateQuestionAndOptions(text) {
+        // "문제내용 1) 선택지1 2) 선택지2..." 패턴에서 문제 부분만 추출
+        const match = text.match(/^(.+?)\s*(?=[1-4A-D]\))/);
+        if (match) {
+            return match[1].trim();
+        }
+        return text;
+    }
+
     for (const line of lines) {
         const trimmed = line.trim();
-        
+
         if (trimmed.match(/^문제\s*\d+:/)) {
             if (currentQuestion) {
+                // 이전 문제에서 options가 비어있으면 question_text에서 추출 시도
+                if (currentQuestion.options.length === 0 && currentQuestion.question_text) {
+                    const extractedOptions = extractOptionsFromLine(currentQuestion.question_text);
+                    if (extractedOptions.length > 0) {
+                        currentQuestion.options = extractedOptions;
+                        currentQuestion.question_text = separateQuestionAndOptions(currentQuestion.question_text);
+                    }
+                }
                 questions.push(currentQuestion);
             }
             currentQuestion = {
@@ -22777,10 +22968,32 @@ function parseQuestionsText(text, questionType) {
                 reference_page: ''
             };
         } else if (currentQuestion) {
-            if (trimmed.match(/^[A-D]\)/)) {
-                currentQuestion.options.push(trimmed);
+            // 한 줄에 여러 선택지가 있는 경우 (예: "1) 옵션1 2) 옵션2 3) 옵션3 4) 옵션4")
+            const inlineOptions = extractOptionsFromLine(trimmed);
+            if (inlineOptions.length >= 2) {
+                currentQuestion.options = inlineOptions;
+            }
+            // 1) 2) 3) 4) 형식 또는 A) B) C) D) 형식 (각 줄에 하나씩)
+            else if (trimmed.match(/^[1-4]\)/) || trimmed.match(/^[A-D]\)/)) {
+                const optionText = trimmed.replace(/^[1-4A-D]\)\s*/, '').trim();
+                currentQuestion.options.push(optionText);
             } else if (trimmed.startsWith('정답:')) {
-                currentQuestion.correct_answer = trimmed.replace('정답:', '').trim();
+                let answer = trimmed.replace('정답:', '').trim();
+                const letterToNum = {'A': '1', 'B': '2', 'C': '3', 'D': '4'};
+                if (letterToNum[answer.toUpperCase()]) {
+                    answer = letterToNum[answer.toUpperCase()];
+                }
+                const numMatch = answer.match(/^([1-4])/);
+                if (numMatch) {
+                    answer = numMatch[1];
+                }
+                currentQuestion.correct_answer = answer;
+            } else if (trimmed.startsWith('모범답안:')) {
+                // 서술형 문제의 모범답안
+                currentQuestion.correct_answer = trimmed.replace('모범답안:', '').trim();
+            } else if (trimmed.startsWith('채점기준:')) {
+                // 서술형 문제의 채점기준 (해설로 저장)
+                currentQuestion.explanation = trimmed.replace('채점기준:', '').trim();
             } else if (trimmed.startsWith('해설:')) {
                 currentQuestion.explanation = trimmed.replace('해설:', '').trim();
             } else if (trimmed.startsWith('참고:')) {
@@ -22790,11 +23003,19 @@ function parseQuestionsText(text, questionType) {
             }
         }
     }
-    
+
     if (currentQuestion) {
+        // 마지막 문제도 처리
+        if (currentQuestion.options.length === 0 && currentQuestion.question_text) {
+            const extractedOptions = extractOptionsFromLine(currentQuestion.question_text);
+            if (extractedOptions.length > 0) {
+                currentQuestion.options = extractedOptions;
+                currentQuestion.question_text = separateQuestionAndOptions(currentQuestion.question_text);
+            }
+        }
         questions.push(currentQuestion);
     }
-    
+
     return questions;
 }
 
@@ -23027,6 +23248,7 @@ async function viewExamDetail(examId) {
                                     <option value="multiple_choice">객관식</option>
                                     <option value="short_answer">단답형</option>
                                     <option value="essay">서술형</option>
+                                    <option value="assignment">과제형</option>
                                 </select>
                             </div>
 
@@ -23447,7 +23669,9 @@ async function updateExam() {
 }
 
 // ==================== 온라인시험 ====================
-function showOnlineExam() {
+let onlineExamMonitorInterval = null;
+
+async function showOnlineExam() {
     const app = document.getElementById('app');
 
     app.innerHTML = `
@@ -23457,47 +23681,905 @@ function showOnlineExam() {
                     <i class="fas fa-laptop mr-2"></i>온라인시험
                 </h2>
                 <div class="space-x-2">
-                    <button onclick="createOnlineExam()" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg">
+                    <button onclick="showCreateOnlineExamModal()" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg">
                         <i class="fas fa-plus mr-2"></i>시험 등록
                     </button>
                 </div>
             </div>
 
-            <!-- 안내 메시지 -->
-            <div class="bg-blue-50 border border-blue-200 rounded-lg p-6 text-center">
-                <i class="fas fa-laptop text-6xl text-blue-400 mb-4"></i>
-                <h3 class="text-xl font-semibold text-gray-800 mb-2">온라인시험 관리</h3>
-                <p class="text-gray-600 mb-4">
-                    문제은행에서 생성한 문제를 활용하여 온라인 시험을 실시할 수 있습니다.<br>
-                    시험 일정 설정, 응시 시간 제한, 자동 채점 등의 기능을 제공합니다.
-                </p>
-                <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mt-6">
-                    <div class="bg-white rounded-lg p-4 shadow">
-                        <i class="fas fa-calendar-alt text-3xl text-green-500 mb-2"></i>
-                        <h4 class="font-semibold">시험 일정</h4>
-                        <p class="text-sm text-gray-500">시험 시작/종료 시간 설정</p>
-                    </div>
-                    <div class="bg-white rounded-lg p-4 shadow">
-                        <i class="fas fa-clock text-3xl text-orange-500 mb-2"></i>
-                        <h4 class="font-semibold">시간 제한</h4>
-                        <p class="text-sm text-gray-500">응시 시간 제한 설정</p>
-                    </div>
-                    <div class="bg-white rounded-lg p-4 shadow">
-                        <i class="fas fa-check-circle text-3xl text-blue-500 mb-2"></i>
-                        <h4 class="font-semibold">자동 채점</h4>
-                        <p class="text-sm text-gray-500">객관식 자동 채점</p>
-                    </div>
+            <div id="online-exam-list">
+                <div class="text-center py-8">
+                    <i class="fas fa-spinner fa-spin text-4xl text-gray-400"></i>
+                    <p class="text-gray-500 mt-2">시험 목록을 불러오는 중...</p>
                 </div>
-                <p class="text-gray-400 text-sm mt-6">
-                    <i class="fas fa-tools mr-1"></i>기능 개발 중...
-                </p>
             </div>
         </div>
     `;
+
+    await loadOnlineExamList();
 }
 
-function createOnlineExam() {
-    showAlert('온라인시험 등록 기능은 준비 중입니다.', 'info', { title: '준비 중' });
+async function loadOnlineExamList() {
+    try {
+        const response = await axios.get(`${API_BASE_URL}/api/online-exams`);
+        const exams = response.data.exams || [];
+
+        const container = document.getElementById('online-exam-list');
+        if (!container) {
+            console.log('온라인 시험 목록 컨테이너가 없습니다. 페이지 전환 필요.');
+            return;
+        }
+
+        if (exams.length === 0) {
+            container.innerHTML = `
+                <div class="bg-blue-50 border border-blue-200 rounded-lg p-6 text-center">
+                    <i class="fas fa-laptop text-6xl text-blue-400 mb-4"></i>
+                    <h3 class="text-xl font-semibold text-gray-800 mb-2">등록된 시험이 없습니다</h3>
+                    <p class="text-gray-600 mb-4">
+                        문제은행에서 생성한 문제를 활용하여 온라인 시험을 등록해보세요.
+                    </p>
+                    <button onclick="showCreateOnlineExamModal()" class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg">
+                        <i class="fas fa-plus mr-2"></i>시험 등록하기
+                    </button>
+                </div>
+            `;
+            return;
+        }
+
+        const statusLabels = {
+            'scheduled': { text: '예정', class: 'bg-gray-100 text-gray-700' },
+            'waiting': { text: '대기중', class: 'bg-yellow-100 text-yellow-700' },
+            'ongoing': { text: '진행중', class: 'bg-green-100 text-green-700' },
+            'ended': { text: '종료', class: 'bg-red-100 text-red-700' },
+            'graded': { text: '채점완료', class: 'bg-blue-100 text-blue-700' }
+        };
+
+        container.innerHTML = `
+            <div class="overflow-x-auto">
+                <table class="min-w-full divide-y divide-gray-200">
+                    <thead class="bg-gray-50">
+                        <tr>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">시험명</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">과정</th>
+                            <th class="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">문항수</th>
+                            <th class="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">시간</th>
+                            <th class="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">상태</th>
+                            <th class="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">응시</th>
+                            <th class="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">관리</th>
+                        </tr>
+                    </thead>
+                    <tbody class="bg-white divide-y divide-gray-200">
+                        ${exams.map(exam => {
+                            const status = statusLabels[exam.status] || statusLabels['scheduled'];
+                            const typeLabel = exam.exam_type === 'quiz' ? '<span class="inline-block px-2 py-0.5 text-xs font-medium rounded bg-orange-100 text-orange-700 mr-2">퀴즈</span>'
+                                            : exam.exam_type === 'assignment' ? '<span class="inline-block px-2 py-0.5 text-xs font-medium rounded bg-green-100 text-green-700 mr-2">과제</span>'
+                                            : '';
+                            const isAssignment = exam.exam_type === 'assignment';
+                            const deadlineStr = exam.deadline ? new Date(exam.deadline).toLocaleString('ko-KR', {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'}) : '';
+
+                            return `
+                                <tr class="hover:bg-gray-50">
+                                    <td class="px-4 py-3">
+                                        <div class="font-medium text-gray-900">
+                                            ${typeLabel}
+                                            ${exam.title}
+                                        </div>
+                                        <div class="text-sm text-gray-500">${exam.exam_bank_name || ''}</div>
+                                        ${isAssignment && deadlineStr ? `<div class="text-xs text-red-600"><i class="fas fa-clock mr-1"></i>마감: ${deadlineStr}</div>` : ''}
+                                    </td>
+                                    <td class="px-4 py-3 text-sm text-gray-600">${exam.course_name || exam.course_code}</td>
+                                    <td class="px-4 py-3 text-center text-sm">${exam.total_questions || 0}문항</td>
+                                    <td class="px-4 py-3 text-center text-sm">${isAssignment ? '-' : exam.duration + '분'}</td>
+                                    <td class="px-4 py-3 text-center">
+                                        <span class="px-2 py-1 text-xs font-medium rounded-full ${status.class}">${status.text}</span>
+                                    </td>
+                                    <td class="px-4 py-3 text-center text-sm">${exam.participant_count || 0}명</td>
+                                    <td class="px-4 py-3 text-center">
+                                        <div class="flex flex-wrap justify-center gap-1">
+                                            ${exam.status === 'scheduled' && !isAssignment ? `
+                                                <button onclick="openWaitingRoom(${exam.id})" class="px-3 py-1 bg-yellow-500 hover:bg-yellow-600 text-white text-xs rounded">
+                                                    <i class="fas fa-door-open mr-1"></i>대기실
+                                                </button>
+                                            ` : ''}
+                                            ${exam.status === 'waiting' ? `
+                                                <button onclick="startOnlineExam(${exam.id})" class="px-3 py-1 bg-green-500 hover:bg-green-600 text-white text-xs rounded">
+                                                    <i class="fas fa-play mr-1"></i>시작
+                                                </button>
+                                            ` : ''}
+                                            ${exam.status === 'ongoing' && !isAssignment ? `
+                                                <button onclick="endOnlineExam(${exam.id}, '${exam.exam_type || 'exam'}')" class="px-3 py-1 bg-red-500 hover:bg-red-600 text-white text-xs rounded">
+                                                    <i class="fas fa-stop mr-1"></i>종료
+                                                </button>
+                                            ` : ''}
+                                            ${exam.status === 'ongoing' && isAssignment ? `
+                                                <button onclick="showExamMonitor(${exam.id})" class="px-3 py-1 bg-blue-500 hover:bg-blue-600 text-white text-xs rounded">
+                                                    <i class="fas fa-list-check mr-1"></i>제출현황
+                                                </button>
+                                                <button onclick="closeAssignment(${exam.id})" class="px-3 py-1 bg-red-500 hover:bg-red-600 text-white text-xs rounded">
+                                                    <i class="fas fa-lock mr-1"></i>마감
+                                                </button>
+                                            ` : ''}
+                                            ${['waiting', 'ongoing'].includes(exam.status) && !isAssignment ? `
+                                                <button onclick="showExamMonitor(${exam.id})" class="px-3 py-1 bg-blue-500 hover:bg-blue-600 text-white text-xs rounded">
+                                                    <i class="fas fa-tv mr-1"></i>모니터링
+                                                </button>
+                                            ` : ''}
+                                            ${exam.status === 'ended' ? `
+                                                <button onclick="gradeOnlineExam(${exam.id})" class="px-3 py-1 bg-purple-500 hover:bg-purple-600 text-white text-xs rounded">
+                                                    <i class="fas fa-check-double mr-1"></i>채점
+                                                </button>
+                                            ` : ''}
+                                            ${exam.status === 'graded' ? `
+                                                <button onclick="showExamResults(${exam.id})" class="px-3 py-1 bg-indigo-500 hover:bg-indigo-600 text-white text-xs rounded">
+                                                    <i class="fas fa-chart-bar mr-1"></i>결과
+                                                </button>
+                                            ` : ''}
+                                            ${!['ongoing'].includes(exam.status) || isAssignment ? `
+                                                <button onclick="deleteOnlineExam(${exam.id})" class="px-3 py-1 bg-gray-400 hover:bg-gray-500 text-white text-xs rounded">
+                                                    <i class="fas fa-trash mr-1"></i>삭제
+                                                </button>
+                                            ` : ''}
+                                        </div>
+                                    </td>
+                                </tr>
+                            `;
+                        }).join('')}
+                    </tbody>
+                </table>
+            </div>
+        `;
+    } catch (error) {
+        console.error('온라인 시험 목록 조회 실패:', error);
+        showAlert('시험 목록을 불러오는데 실패했습니다.', 'error');
+    }
+}
+
+async function showCreateOnlineExamModal() {
+    try {
+        // 문제은행 목록과 과정 목록 조회
+        const [examBankRes, coursesRes] = await Promise.all([
+            axios.get(`${API_BASE_URL}/api/exam-bank/list`),
+            axios.get(`${API_BASE_URL}/api/courses`)
+        ]);
+
+        const examBanks = examBankRes.data.exams || [];
+        const courses = coursesRes.data || [];
+
+        if (examBanks.length === 0) {
+            showAlert('먼저 문제은행에서 시험을 생성해주세요.', 'warning', { title: '문제은행 필요' });
+            return;
+        }
+
+        const modalHtml = `
+            <div id="create-exam-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+                <div class="bg-white rounded-lg shadow-xl w-full max-w-lg mx-4 max-h-[90vh] overflow-y-auto">
+                    <div class="flex justify-between items-center p-4 border-b sticky top-0 bg-white">
+                        <h3 class="text-lg font-bold text-gray-800">
+                            <i class="fas fa-plus-circle mr-2 text-blue-500"></i><span id="modal-title">온라인 시험 등록</span>
+                        </h3>
+                        <button onclick="closeCreateExamModal()" class="text-gray-500 hover:text-gray-700">
+                            <i class="fas fa-times text-xl"></i>
+                        </button>
+                    </div>
+                    <div class="p-4 space-y-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">유형 선택 *</label>
+                            <div class="flex space-x-4 flex-wrap gap-2">
+                                <label class="flex items-center cursor-pointer">
+                                    <input type="radio" name="exam-type" value="exam" checked class="mr-2" onchange="updateExamTypeUI()">
+                                    <span class="px-3 py-1 rounded-full bg-blue-100 text-blue-700 text-sm">시험</span>
+                                </label>
+                                <label class="flex items-center cursor-pointer">
+                                    <input type="radio" name="exam-type" value="quiz" class="mr-2" onchange="updateExamTypeUI()">
+                                    <span class="px-3 py-1 rounded-full bg-orange-100 text-orange-700 text-sm">퀴즈</span>
+                                </label>
+                                <label class="flex items-center cursor-pointer">
+                                    <input type="radio" name="exam-type" value="assignment" class="mr-2" onchange="updateExamTypeUI()">
+                                    <span class="px-3 py-1 rounded-full bg-green-100 text-green-700 text-sm">과제</span>
+                                </label>
+                            </div>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">문제은행 시험 선택 *</label>
+                            <select id="exam-bank-select" class="w-full border rounded-lg px-3 py-2" onchange="updateExamTitle()">
+                                <option value="">시험을 선택하세요</option>
+                                ${examBanks.map(e => `<option value="${e.exam_id}" data-name="${e.exam_name}" data-questions="${e.total_questions}">${e.exam_name} (${e.total_questions}문항)</option>`).join('')}
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">제목 *</label>
+                            <input type="text" id="exam-title" class="w-full border rounded-lg px-3 py-2" placeholder="제목을 입력하세요">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">대상 과정 *</label>
+                            <select id="exam-course" class="w-full border rounded-lg px-3 py-2">
+                                <option value="">과정을 선택하세요</option>
+                                ${courses.map(c => `<option value="${c.code}">${c.name}</option>`).join('')}
+                            </select>
+                        </div>
+
+                        <!-- 시험/퀴즈: 시간(분) 설정 -->
+                        <div id="duration-section" class="grid grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1"><span id="duration-label">시험</span> 시간 (분) *</label>
+                                <input type="number" id="exam-duration" class="w-full border rounded-lg px-3 py-2" value="60" min="1" max="180">
+                                <p id="duration-hint" class="text-xs text-gray-500 mt-1 hidden">퀴즈는 1분부터 설정 가능</p>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">합격 점수</label>
+                                <input type="number" id="exam-pass-score" class="w-full border rounded-lg px-3 py-2" value="60" min="0" max="100">
+                            </div>
+                        </div>
+
+                        <!-- 과제: 마감일 설정 -->
+                        <div id="deadline-section" class="hidden">
+                            <label class="block text-sm font-medium text-gray-700 mb-1">제출 마감일 *</label>
+                            <input type="datetime-local" id="exam-deadline" class="w-full border rounded-lg px-3 py-2">
+                            <p class="text-xs text-gray-500 mt-1">학생들은 마감일까지 제출/수정 가능합니다</p>
+                        </div>
+
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1"><span id="desc-label">시험</span> 안내사항</label>
+                            <textarea id="exam-description" class="w-full border rounded-lg px-3 py-2" rows="3" placeholder="학생들에게 안내할 사항을 입력하세요"></textarea>
+                        </div>
+                    </div>
+                    <div class="flex justify-end space-x-2 p-4 border-t bg-gray-50 sticky bottom-0">
+                        <button onclick="closeCreateExamModal()" class="px-4 py-2 bg-gray-300 hover:bg-gray-400 text-gray-700 rounded-lg">
+                            취소
+                        </button>
+                        <button onclick="submitCreateOnlineExam()" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg">
+                            <i class="fas fa-check mr-1"></i>등록
+                        </button>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        document.body.insertAdjacentHTML('beforeend', modalHtml);
+    } catch (error) {
+        console.error('시험 등록 모달 오류:', error);
+        showAlert('시험 등록 화면을 불러오는데 실패했습니다.', 'error');
+    }
+}
+
+function updateExamTitle() {
+    const select = document.getElementById('exam-bank-select');
+    const selectedOption = select.options[select.selectedIndex];
+    if (selectedOption && selectedOption.dataset.name) {
+        document.getElementById('exam-title').value = selectedOption.dataset.name;
+    }
+}
+
+function updateExamTypeUI() {
+    const examType = document.querySelector('input[name="exam-type"]:checked')?.value || 'exam';
+    const durationSection = document.getElementById('duration-section');
+    const deadlineSection = document.getElementById('deadline-section');
+    const durationLabel = document.getElementById('duration-label');
+    const durationHint = document.getElementById('duration-hint');
+    const durationInput = document.getElementById('exam-duration');
+    const descLabel = document.getElementById('desc-label');
+    const modalTitle = document.getElementById('modal-title');
+
+    const typeNames = { exam: '시험', quiz: '퀴즈', assignment: '과제' };
+    if (modalTitle) modalTitle.textContent = `온라인 ${typeNames[examType]} 등록`;
+    if (descLabel) descLabel.textContent = typeNames[examType];
+
+    if (examType === 'assignment') {
+        // 과제: 마감일 설정 표시, 시간 설정 숨김
+        if (durationSection) durationSection.classList.add('hidden');
+        if (deadlineSection) deadlineSection.classList.remove('hidden');
+        // 기본 마감일: 7일 후 23:59
+        const deadline = document.getElementById('exam-deadline');
+        if (deadline && !deadline.value) {
+            const d = new Date();
+            d.setDate(d.getDate() + 7);
+            d.setHours(23, 59);
+            deadline.value = d.toISOString().slice(0, 16);
+        }
+    } else {
+        // 시험/퀴즈: 시간 설정 표시, 마감일 숨김
+        if (durationSection) durationSection.classList.remove('hidden');
+        if (deadlineSection) deadlineSection.classList.add('hidden');
+
+        if (examType === 'quiz') {
+            if (durationLabel) durationLabel.textContent = '퀴즈';
+            if (durationHint) durationHint.classList.remove('hidden');
+            if (durationInput) durationInput.value = 5;
+        } else {
+            if (durationLabel) durationLabel.textContent = '시험';
+            if (durationHint) durationHint.classList.add('hidden');
+            if (durationInput) durationInput.value = 60;
+        }
+    }
+}
+
+function closeCreateExamModal() {
+    const modal = document.getElementById('create-exam-modal');
+    if (modal) modal.remove();
+}
+
+async function submitCreateOnlineExam() {
+    const examType = document.querySelector('input[name="exam-type"]:checked')?.value || 'exam';
+    const examBankId = document.getElementById('exam-bank-select').value;
+    const title = document.getElementById('exam-title').value.trim();
+    const courseCode = document.getElementById('exam-course').value;
+    const duration = parseInt(document.getElementById('exam-duration').value) || 60;
+    const passScore = parseInt(document.getElementById('exam-pass-score').value) || 60;
+    const description = document.getElementById('exam-description').value.trim();
+    const deadline = document.getElementById('exam-deadline')?.value;
+
+    if (!examBankId || !title || !courseCode) {
+        showAlert('문제은행, 제목, 과정을 모두 선택/입력해주세요.', 'warning');
+        return;
+    }
+
+    // 과제형일 때 마감일 필수
+    if (examType === 'assignment' && !deadline) {
+        showAlert('과제 마감일을 설정해주세요.', 'warning');
+        return;
+    }
+
+    try {
+        const instructor = JSON.parse(sessionStorage.getItem('instructor') || '{}');
+        const requestData = {
+            exam_type: examType,
+            exam_bank_id: parseInt(examBankId),
+            title: title,
+            course_code: courseCode,
+            instructor_code: instructor.code || 'admin',
+            duration: duration,
+            pass_score: passScore,
+            description: description
+        };
+
+        // 과제형일 때 deadline 추가
+        if (examType === 'assignment' && deadline) {
+            requestData.deadline = deadline.replace('T', ' ') + ':00';
+        }
+
+        const response = await axios.post(`${API_BASE_URL}/api/online-exams`, requestData);
+
+        if (response.data.success) {
+            closeCreateExamModal();
+            const typeText = { exam: '시험', quiz: '퀴즈', assignment: '과제' }[examType];
+            showAlert(`온라인 ${typeText}이(가) 등록되었습니다.`, 'success');
+
+            // 과제면 과제관리로, 시험/퀴즈면 온라인시험으로 이동
+            if (examType === 'assignment') {
+                await showAssignments();
+            } else {
+                await showOnlineExam();
+            }
+        }
+    } catch (error) {
+        console.error('등록 실패:', error);
+        showAlert('등록에 실패했습니다.', 'error');
+    }
+}
+
+async function openWaitingRoom(examId) {
+    const confirmed = await showConfirm('대기실을 오픈하시겠습니까?<br>학생들이 대기실에 입장할 수 있게 됩니다.', '대기실 오픈');
+    if (!confirmed) return;
+
+    try {
+        const response = await axios.post(`${API_BASE_URL}/api/online-exams/${examId}/open-waiting`, {});
+        if (response.data.success) {
+            showAlert('대기실이 오픈되었습니다.', 'success');
+            await loadOnlineExamList();
+        }
+    } catch (error) {
+        console.error('대기실 오픈 실패:', error);
+        showAlert('대기실 오픈에 실패했습니다.', 'error');
+    }
+}
+
+async function startOnlineExam(examId) {
+    const confirmed = await showConfirm('시험을 시작하시겠습니까?<br>대기 중인 모든 학생에게 시험지가 공개됩니다.', '시험 시작');
+    if (!confirmed) return;
+
+    try {
+        const response = await axios.post(`${API_BASE_URL}/api/online-exams/${examId}/start`, {});
+        if (response.data.success) {
+            showAlert('시험이 시작되었습니다!', 'success');
+            await loadOnlineExamList();
+            showExamMonitor(examId);
+        }
+    } catch (error) {
+        console.error('시험 시작 실패:', error);
+        showAlert(error.response?.data?.detail || '시험 시작에 실패했습니다.', 'error');
+    }
+}
+
+async function endOnlineExam(examId, examType = null, skipConfirm = false) {
+    if (!skipConfirm) {
+        const typeText = examType === 'quiz' ? '퀴즈' : '시험';
+        const confirmed = await showConfirm(`${typeText}을(를) 강제 종료하시겠습니까?<br>미제출 학생은 현재 상태로 자동 제출됩니다.`, `${typeText} 종료`);
+        if (!confirmed) return;
+    }
+
+    try {
+        const response = await axios.post(`${API_BASE_URL}/api/online-exams/${examId}/end`, {});
+        if (response.data.success) {
+            if (onlineExamMonitorInterval) {
+                clearInterval(onlineExamMonitorInterval);
+                onlineExamMonitorInterval = null;
+            }
+
+            // examType 정보가 없으면 API에서 가져옴
+            if (!examType) {
+                try {
+                    const examRes = await axios.get(`${API_BASE_URL}/api/online-exams/${examId}`);
+                    examType = examRes.data.exam?.exam_type;
+                } catch (e) {
+                    console.error('exam type 조회 실패', e);
+                }
+            }
+
+            // 퀴즈인 경우 자동 채점 후 결과 화면으로
+            if (examType === 'quiz') {
+                showAlert('퀴즈가 종료되었습니다. 자동 채점을 진행합니다...', 'info');
+                try {
+                    await axios.post(`${API_BASE_URL}/api/online-exams/${examId}/grade`, {});
+                    showAlert('채점이 완료되었습니다!', 'success');
+                    await showExamResults(examId);
+                } catch (gradeError) {
+                    console.error('자동 채점 실패:', gradeError);
+                    showAlert('채점에 실패했습니다.', 'error');
+                    await loadOnlineExamList();
+                }
+            } else {
+                showAlert('시험이 종료되었습니다.', 'success');
+                await loadOnlineExamList();
+            }
+        }
+    } catch (error) {
+        console.error('종료 실패:', error);
+        showAlert('종료에 실패했습니다.', 'error');
+    }
+}
+
+async function closeAssignment(examId) {
+    const confirmed = await showConfirm('과제를 마감하시겠습니까?<br>마감 후에는 학생들이 더 이상 제출할 수 없습니다.', '과제 마감');
+    if (!confirmed) return;
+
+    try {
+        const response = await axios.post(`${API_BASE_URL}/api/online-exams/${examId}/end`, {});
+        if (response.data.success) {
+            showAlert('과제가 마감되었습니다.', 'success');
+            await loadOnlineExamList();
+        }
+    } catch (error) {
+        console.error('마감 실패:', error);
+        showAlert('마감에 실패했습니다.', 'error');
+    }
+}
+
+async function gradeOnlineExam(examId) {
+    const confirmed = await showConfirm('자동 채점을 진행하시겠습니까?', '자동 채점');
+    if (!confirmed) return;
+
+    try {
+        const response = await axios.post(`${API_BASE_URL}/api/online-exams/${examId}/grade`, {});
+        if (response.data.success) {
+            showAlert(`${response.data.graded_count}명의 답안이 채점되었습니다.`, 'success');
+            await loadOnlineExamList();
+        }
+    } catch (error) {
+        console.error('채점 실패:', error);
+        showAlert('채점에 실패했습니다.', 'error');
+    }
+}
+
+async function deleteOnlineExam(examId) {
+    const confirmed = await showConfirm('이 시험을 삭제하시겠습니까?<br>삭제된 시험은 복구할 수 없습니다.', '시험 삭제');
+    if (!confirmed) return;
+
+    try {
+        const response = await axios.delete(`${API_BASE_URL}/api/online-exams/${examId}`);
+        if (response.data.success) {
+            showAlert('시험이 삭제되었습니다.', 'success');
+            await loadOnlineExamList();
+        }
+    } catch (error) {
+        console.error('시험 삭제 실패:', error);
+        showAlert(error.response?.data?.detail || '시험 삭제에 실패했습니다.', 'error');
+    }
+}
+
+async function showExamMonitor(examId) {
+    const app = document.getElementById('app');
+
+    app.innerHTML = `
+        <div class="bg-white rounded-lg shadow-md p-6">
+            <div class="flex justify-between items-center mb-6">
+                <h2 class="text-2xl font-bold text-gray-800">
+                    <i class="fas fa-tv mr-2"></i>시험 모니터링
+                </h2>
+                <button onclick="showOnlineExam()" class="px-4 py-2 bg-gray-500 hover:bg-gray-600 text-white rounded-lg">
+                    <i class="fas fa-arrow-left mr-2"></i>목록으로
+                </button>
+            </div>
+            <div id="monitor-content">
+                <div class="text-center py-8">
+                    <i class="fas fa-spinner fa-spin text-4xl text-gray-400"></i>
+                </div>
+            </div>
+        </div>
+    `;
+
+    await updateExamMonitor(examId);
+
+    // 3초마다 갱신
+    if (onlineExamMonitorInterval) clearInterval(onlineExamMonitorInterval);
+    onlineExamMonitorInterval = setInterval(() => updateExamMonitor(examId), 3000);
+}
+
+async function updateExamMonitor(examId) {
+    try {
+        const response = await axios.get(`${API_BASE_URL}/api/online-exams/${examId}/monitor`);
+        const { exam, participants, stats, remaining_seconds } = response.data;
+
+        const statusLabels = {
+            'waiting': '대기중', 'taking': '응시중', 'submitted': '제출완료', 'graded': '채점완료'
+        };
+
+        const formatTime = (seconds) => {
+            if (seconds === null) return '--:--';
+            const m = Math.floor(seconds / 60);
+            const s = seconds % 60;
+            return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+        };
+
+        const container = document.getElementById('monitor-content');
+        if (!container) return;
+
+        container.innerHTML = `
+            <div class="mb-6">
+                <div class="bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-lg p-6">
+                    <h3 class="text-2xl font-bold mb-2">${exam.title}</h3>
+                    <div class="flex flex-wrap gap-4 text-sm">
+                        <span><i class="fas fa-book mr-1"></i>${exam.exam_bank_name}</span>
+                        <span><i class="fas fa-clock mr-1"></i>${exam.duration}분</span>
+                        <span><i class="fas fa-question-circle mr-1"></i>${exam.total_questions}문항</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
+                <div class="bg-gray-100 rounded-lg p-4 text-center">
+                    <div class="text-3xl font-bold text-gray-700">${stats.total_students}</div>
+                    <div class="text-sm text-gray-500">전체 학생</div>
+                </div>
+                <div class="bg-yellow-100 rounded-lg p-4 text-center">
+                    <div class="text-3xl font-bold text-yellow-700">${stats.entered_count}</div>
+                    <div class="text-sm text-yellow-600">입장</div>
+                </div>
+                <div class="bg-green-100 rounded-lg p-4 text-center">
+                    <div class="text-3xl font-bold text-green-700">${stats.taking_count}</div>
+                    <div class="text-sm text-green-600">응시중</div>
+                </div>
+                <div class="bg-blue-100 rounded-lg p-4 text-center">
+                    <div class="text-3xl font-bold text-blue-700">${stats.submitted_count}</div>
+                    <div class="text-sm text-blue-600">제출완료</div>
+                </div>
+                <div class="bg-red-100 rounded-lg p-4 text-center ${remaining_seconds !== null && remaining_seconds <= 60 ? 'animate-pulse' : ''}">
+                    <div class="text-3xl font-bold text-red-700">${formatTime(remaining_seconds)}</div>
+                    <div class="text-sm text-red-600">남은 시간</div>
+                </div>
+            </div>
+
+            <div class="flex space-x-2 mb-4">
+                ${exam.status === 'waiting' ? `
+                    <button onclick="startOnlineExam(${examId})" class="px-4 py-2 bg-green-500 hover:bg-green-600 text-white rounded-lg">
+                        <i class="fas fa-play mr-2"></i>시험 시작
+                    </button>
+                ` : ''}
+                ${exam.status === 'ongoing' ? `
+                    <button onclick="endOnlineExam(${examId}, '${exam.exam_type || 'exam'}')" class="px-4 py-2 bg-red-500 hover:bg-red-600 text-white rounded-lg">
+                        <i class="fas fa-stop mr-2"></i>${exam.exam_type === 'quiz' ? '퀴즈' : '시험'} 종료
+                    </button>
+                ` : ''}
+            </div>
+
+            <div class="bg-gray-50 rounded-lg p-4">
+                <h4 class="font-semibold text-gray-700 mb-3"><i class="fas fa-users mr-2"></i>응시자 현황</h4>
+                ${participants.length === 0 ? `
+                    <p class="text-gray-500 text-center py-4">아직 입장한 학생이 없습니다.</p>
+                ` : `
+                    <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-2">
+                        ${participants.map(p => {
+                            const statusColor = {
+                                'waiting': 'bg-yellow-200 border-yellow-400',
+                                'taking': 'bg-green-200 border-green-400',
+                                'submitted': 'bg-blue-200 border-blue-400',
+                                'graded': 'bg-purple-200 border-purple-400'
+                            }[p.status] || 'bg-gray-200';
+                            return `
+                                <div class="p-2 rounded border-2 ${statusColor} text-center">
+                                    <div class="font-medium text-sm">${p.student_name}</div>
+                                    <div class="text-xs text-gray-600">${statusLabels[p.status]}</div>
+                                </div>
+                            `;
+                        }).join('')}
+                    </div>
+                `}
+            </div>
+        `;
+
+        // 타이머가 0이 되면 자동 종료
+        if (exam.status === 'ongoing' && remaining_seconds !== null && remaining_seconds <= 0) {
+            if (onlineExamMonitorInterval) {
+                clearInterval(onlineExamMonitorInterval);
+                onlineExamMonitorInterval = null;
+            }
+            showAlert('시험 시간이 종료되어 자동 종료됩니다.', 'info');
+            await autoEndOnlineExam(examId);
+            return;
+        }
+
+        // 시험이 종료되면 모니터링 중지 및 목록으로 이동
+        if (exam.status === 'ended' || exam.status === 'graded') {
+            if (onlineExamMonitorInterval) {
+                clearInterval(onlineExamMonitorInterval);
+                onlineExamMonitorInterval = null;
+            }
+            // 종료 상태면 3초 후 목록으로 이동
+            setTimeout(() => {
+                showOnlineExam();
+            }, 3000);
+        }
+    } catch (error) {
+        console.error('모니터링 업데이트 실패:', error);
+    }
+}
+
+// 시험 자동 종료 (타이머 만료 시)
+async function autoEndOnlineExam(examId) {
+    try {
+        // 먼저 시험 정보를 가져옴
+        let examType = null;
+        try {
+            const examRes = await axios.get(`${API_BASE_URL}/api/online-exams/${examId}`);
+            examType = examRes.data.exam?.exam_type;
+        } catch (e) {}
+
+        const response = await axios.post(`${API_BASE_URL}/api/online-exams/${examId}/end`, {});
+        if (response.data.success) {
+            // 퀴즈인 경우 자동 채점 후 결과 화면으로
+            if (examType === 'quiz') {
+                showAlert('퀴즈가 자동 종료되었습니다. 채점을 진행합니다...', 'info');
+                try {
+                    await axios.post(`${API_BASE_URL}/api/online-exams/${examId}/grade`, {});
+                    showAlert('채점이 완료되었습니다!', 'success');
+                    await showExamResults(examId);
+                } catch (gradeError) {
+                    console.error('자동 채점 실패:', gradeError);
+                    showOnlineExam();
+                }
+            } else {
+                showAlert('시험이 자동 종료되었습니다.', 'success');
+                setTimeout(() => {
+                    showOnlineExam();
+                }, 2000);
+            }
+        }
+    } catch (error) {
+        console.error('자동 종료 실패:', error);
+        showOnlineExam();
+    }
+}
+
+async function showExamResults(examId) {
+    const app = document.getElementById('app');
+
+    app.innerHTML = `
+        <div class="bg-white rounded-lg shadow-md p-6">
+            <div class="flex justify-between items-center mb-6">
+                <h2 class="text-2xl font-bold text-gray-800">
+                    <i class="fas fa-chart-bar mr-2"></i>시험 결과
+                </h2>
+                <button onclick="showOnlineExam()" class="px-4 py-2 bg-gray-500 hover:bg-gray-600 text-white rounded-lg">
+                    <i class="fas fa-arrow-left mr-2"></i>목록으로
+                </button>
+            </div>
+            <div id="results-content">
+                <div class="text-center py-8">
+                    <i class="fas fa-spinner fa-spin text-4xl text-gray-400"></i>
+                </div>
+            </div>
+        </div>
+    `;
+
+    try {
+        const response = await axios.get(`${API_BASE_URL}/api/online-exams/${examId}/results`);
+        const { exam, results, stats } = response.data;
+
+        const container = document.getElementById('results-content');
+        const isQuiz = exam.exam_type === 'quiz';
+        const typeText = isQuiz ? '퀴즈' : '시험';
+
+        // 퀴즈인 경우 정답자/오답자 분리
+        let correctStudents = [];
+        let incorrectStudents = [];
+        if (isQuiz) {
+            correctStudents = results.filter(r => r.is_all_correct);
+            incorrectStudents = results.filter(r => !r.is_all_correct);
+        }
+
+        // 제목 업데이트
+        document.querySelector('h2').innerHTML = `<i class="fas fa-chart-bar mr-2"></i>${typeText} 결과`;
+
+        if (isQuiz) {
+            // 퀴즈용 결과 화면
+            container.innerHTML = `
+                <div class="mb-6">
+                    <div class="bg-gradient-to-r from-orange-500 to-orange-600 text-white rounded-lg p-6">
+                        <h3 class="text-2xl font-bold mb-2">${exam.title}</h3>
+                        <div class="text-sm opacity-90">${exam.exam_bank_name} | ${exam.total_questions}문항</div>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+                    <div class="bg-gray-100 rounded-lg p-4 text-center">
+                        <div class="text-2xl font-bold text-gray-700">${stats.total_count}명</div>
+                        <div class="text-sm text-gray-500">응시자</div>
+                    </div>
+                    <div class="bg-green-100 rounded-lg p-4 text-center">
+                        <div class="text-2xl font-bold text-green-700">${correctStudents.length}명</div>
+                        <div class="text-sm text-green-600">전부 정답</div>
+                    </div>
+                    <div class="bg-red-100 rounded-lg p-4 text-center">
+                        <div class="text-2xl font-bold text-red-700">${incorrectStudents.length}명</div>
+                        <div class="text-sm text-red-600">오답 있음</div>
+                    </div>
+                    <div class="bg-blue-100 rounded-lg p-4 text-center">
+                        <div class="text-2xl font-bold text-blue-700">${stats.average_score}점</div>
+                        <div class="text-sm text-blue-600">평균</div>
+                    </div>
+                </div>
+
+                <!-- 정답자 섹션 -->
+                <div class="mb-6">
+                    <h4 class="text-lg font-bold text-green-700 mb-3 flex items-center">
+                        <i class="fas fa-check-circle mr-2"></i>전부 정답 (${correctStudents.length}명)
+                    </h4>
+                    ${correctStudents.length > 0 ? `
+                        <div class="bg-green-50 rounded-lg p-4">
+                            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                                ${correctStudents.map(r => {
+                                    const rankIcon = r.rank === 1 ? '🥇' : r.rank === 2 ? '🥈' : r.rank === 3 ? '🥉' : `${r.rank}위`;
+                                    return `
+                                        <div class="bg-white rounded-lg p-3 shadow-sm border-l-4 border-green-500 flex items-center justify-between">
+                                            <div class="flex items-center">
+                                                <span class="text-2xl mr-3">${rankIcon}</span>
+                                                <div>
+                                                    <div class="font-bold text-gray-800">${r.student_name}</div>
+                                                    <div class="text-xs text-gray-500">${r.student_code || ''}</div>
+                                                </div>
+                                            </div>
+                                            <div class="text-right">
+                                                <div class="text-sm font-medium text-green-600">${r.score}점</div>
+                                                <div class="text-xs text-gray-500">${r.submitted_at ? new Date(r.submitted_at).toLocaleTimeString('ko-KR') : '-'}</div>
+                                            </div>
+                                        </div>
+                                    `;
+                                }).join('')}
+                            </div>
+                        </div>
+                    ` : `
+                        <div class="bg-gray-100 rounded-lg p-4 text-center text-gray-500">
+                            전부 정답인 학생이 없습니다
+                        </div>
+                    `}
+                </div>
+
+                <!-- 오답자 섹션 -->
+                <div>
+                    <h4 class="text-lg font-bold text-red-700 mb-3 flex items-center">
+                        <i class="fas fa-times-circle mr-2"></i>오답 있음 (${incorrectStudents.length}명)
+                    </h4>
+                    ${incorrectStudents.length > 0 ? `
+                        <div class="bg-red-50 rounded-lg p-4">
+                            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                                ${incorrectStudents.map(r => `
+                                    <div class="bg-white rounded-lg p-3 shadow-sm border-l-4 border-red-400 flex items-center justify-between">
+                                        <div>
+                                            <div class="font-bold text-gray-800">${r.student_name}</div>
+                                            <div class="text-xs text-gray-500">${r.student_code || ''}</div>
+                                        </div>
+                                        <div class="text-right">
+                                            <div class="text-sm font-medium text-red-600">${r.score}점 (${r.correct_count}/${r.total_questions})</div>
+                                            <div class="text-xs text-gray-500">${r.submitted_at ? new Date(r.submitted_at).toLocaleTimeString('ko-KR') : '-'}</div>
+                                        </div>
+                                    </div>
+                                `).join('')}
+                            </div>
+                        </div>
+                    ` : `
+                        <div class="bg-gray-100 rounded-lg p-4 text-center text-gray-500">
+                            오답이 있는 학생이 없습니다
+                        </div>
+                    `}
+                </div>
+            `;
+        } else {
+            // 기존 시험 결과 화면
+            container.innerHTML = `
+                <div class="mb-6">
+                    <div class="bg-gradient-to-r from-indigo-500 to-indigo-600 text-white rounded-lg p-6">
+                        <h3 class="text-2xl font-bold mb-2">${exam.title}</h3>
+                        <div class="text-sm opacity-90">${exam.exam_bank_name} | ${exam.total_questions}문항</div>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-2 md:grid-cols-6 gap-4 mb-6">
+                    <div class="bg-gray-100 rounded-lg p-4 text-center">
+                        <div class="text-2xl font-bold text-gray-700">${stats.total_count}명</div>
+                        <div class="text-sm text-gray-500">응시자</div>
+                    </div>
+                    <div class="bg-blue-100 rounded-lg p-4 text-center">
+                        <div class="text-2xl font-bold text-blue-700">${stats.average_score}점</div>
+                        <div class="text-sm text-blue-600">평균</div>
+                    </div>
+                    <div class="bg-green-100 rounded-lg p-4 text-center">
+                        <div class="text-2xl font-bold text-green-700">${stats.max_score}점</div>
+                        <div class="text-sm text-green-600">최고</div>
+                    </div>
+                    <div class="bg-red-100 rounded-lg p-4 text-center">
+                        <div class="text-2xl font-bold text-red-700">${stats.min_score}점</div>
+                        <div class="text-sm text-red-600">최저</div>
+                    </div>
+                    <div class="bg-green-100 rounded-lg p-4 text-center">
+                        <div class="text-2xl font-bold text-green-700">${stats.pass_count}명</div>
+                        <div class="text-sm text-green-600">합격</div>
+                    </div>
+                    <div class="bg-red-100 rounded-lg p-4 text-center">
+                        <div class="text-2xl font-bold text-red-700">${stats.fail_count}명</div>
+                        <div class="text-sm text-red-600">불합격</div>
+                    </div>
+                </div>
+
+                <div class="overflow-x-auto">
+                    <table class="min-w-full divide-y divide-gray-200">
+                        <thead class="bg-gray-50">
+                            <tr>
+                                <th class="px-4 py-3 text-center text-xs font-medium text-gray-500">순위</th>
+                                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">학생</th>
+                                <th class="px-4 py-3 text-center text-xs font-medium text-gray-500">점수</th>
+                                <th class="px-4 py-3 text-center text-xs font-medium text-gray-500">정답</th>
+                                <th class="px-4 py-3 text-center text-xs font-medium text-gray-500">합격여부</th>
+                                <th class="px-4 py-3 text-center text-xs font-medium text-gray-500">제출시간</th>
+                            </tr>
+                        </thead>
+                        <tbody class="bg-white divide-y divide-gray-200">
+                            ${results.sort((a, b) => b.score - a.score).map((r, i) => `
+                                <tr class="${r.is_passed ? 'bg-green-50' : 'bg-red-50'}">
+                                    <td class="px-4 py-3 text-center font-bold ${i < 3 ? 'text-yellow-600' : ''}">${i + 1}</td>
+                                    <td class="px-4 py-3">
+                                        <div class="font-medium">${r.student_name}</div>
+                                        <div class="text-xs text-gray-500">${r.student_code || ''}</div>
+                                    </td>
+                                    <td class="px-4 py-3 text-center text-lg font-bold">${r.score}점</td>
+                                    <td class="px-4 py-3 text-center">${r.correct_count}/${r.total_questions}</td>
+                                    <td class="px-4 py-3 text-center">
+                                        ${r.is_passed ?
+                                            '<span class="px-2 py-1 bg-green-200 text-green-800 rounded-full text-xs">합격</span>' :
+                                            '<span class="px-2 py-1 bg-red-200 text-red-800 rounded-full text-xs">불합격</span>'}
+                                    </td>
+                                    <td class="px-4 py-3 text-center text-sm text-gray-500">
+                                        ${r.submitted_at ? new Date(r.submitted_at).toLocaleTimeString('ko-KR') : '-'}
+                                    </td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            `;
+        }
+    } catch (error) {
+        console.error('시험 결과 조회 실패:', error);
+        showAlert('시험 결과를 불러오는데 실패했습니다.', 'error');
+    }
 }
 
 // ==================== 선착순 퀴즈 ====================
@@ -23555,7 +24637,7 @@ function createQuickQuiz() {
 }
 
 // ==================== 과제관리 ====================
-function showAssignments() {
+async function showAssignments() {
     const app = document.getElementById('app');
 
     app.innerHTML = `
@@ -23570,42 +24652,297 @@ function showAssignments() {
                     </button>
                 </div>
             </div>
-
-            <!-- 안내 메시지 -->
-            <div class="bg-green-50 border border-green-200 rounded-lg p-6 text-center">
-                <i class="fas fa-tasks text-6xl text-green-400 mb-4"></i>
-                <h3 class="text-xl font-semibold text-gray-800 mb-2">과제관리</h3>
-                <p class="text-gray-600 mb-4">
-                    학생들에게 과제를 부여하고 제출 현황을 관리할 수 있습니다.<br>
-                    파일 제출, 텍스트 작성, 링크 제출 등 다양한 형태의 과제를 지원합니다.
-                </p>
-                <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mt-6">
-                    <div class="bg-white rounded-lg p-4 shadow">
-                        <i class="fas fa-file-upload text-3xl text-blue-500 mb-2"></i>
-                        <h4 class="font-semibold">과제 제출</h4>
-                        <p class="text-sm text-gray-500">파일/텍스트/링크 제출</p>
-                    </div>
-                    <div class="bg-white rounded-lg p-4 shadow">
-                        <i class="fas fa-calendar-check text-3xl text-orange-500 mb-2"></i>
-                        <h4 class="font-semibold">마감일 관리</h4>
-                        <p class="text-sm text-gray-500">제출 기한 설정 및 알림</p>
-                    </div>
-                    <div class="bg-white rounded-lg p-4 shadow">
-                        <i class="fas fa-chart-bar text-3xl text-purple-500 mb-2"></i>
-                        <h4 class="font-semibold">제출 현황</h4>
-                        <p class="text-sm text-gray-500">실시간 제출 현황 확인</p>
-                    </div>
+            <div id="assignment-list-content">
+                <div class="text-center py-8">
+                    <i class="fas fa-spinner fa-spin text-4xl text-gray-400"></i>
                 </div>
-                <p class="text-gray-400 text-sm mt-6">
-                    <i class="fas fa-tools mr-1"></i>기능 개발 중...
-                </p>
             </div>
         </div>
     `;
+
+    await loadAssignmentList();
 }
 
-function createAssignment() {
-    showAlert('과제 등록 기능은 준비 중입니다.', 'info', { title: '준비 중' });
+async function loadAssignmentList() {
+    try {
+        const instructor = JSON.parse(sessionStorage.getItem('instructor') || '{}');
+        const response = await axios.get(`${API_BASE_URL}/api/online-exams`);
+        // 과제만 필터링
+        const assignments = (response.data.exams || []).filter(e => e.exam_type === 'assignment');
+
+        const container = document.getElementById('assignment-list-content');
+        if (!container) return;
+
+        if (assignments.length === 0) {
+            container.innerHTML = `
+                <div class="bg-green-50 border border-green-200 rounded-lg p-8 text-center">
+                    <i class="fas fa-tasks text-6xl text-green-300 mb-4"></i>
+                    <h3 class="text-xl font-semibold text-gray-700 mb-2">등록된 과제가 없습니다</h3>
+                    <p class="text-gray-500 mb-4">새 과제를 등록해보세요.</p>
+                    <button onclick="createAssignment()" class="bg-green-600 hover:bg-green-700 text-white px-6 py-2 rounded-lg">
+                        <i class="fas fa-plus mr-2"></i>과제 등록
+                    </button>
+                </div>
+            `;
+            return;
+        }
+
+        const statusLabels = { 'ongoing': '진행중', 'ended': '마감됨', 'graded': '채점완료' };
+        const statusColors = {
+            'ongoing': 'bg-green-100 text-green-700',
+            'ended': 'bg-gray-100 text-gray-600',
+            'graded': 'bg-purple-100 text-purple-700'
+        };
+
+        container.innerHTML = `
+            <div class="overflow-x-auto">
+                <table class="min-w-full">
+                    <thead class="bg-gray-100">
+                        <tr>
+                            <th class="px-4 py-3 text-left text-sm font-semibold text-gray-700">과제명</th>
+                            <th class="px-4 py-3 text-left text-sm font-semibold text-gray-700">과정</th>
+                            <th class="px-4 py-3 text-center text-sm font-semibold text-gray-700">마감일</th>
+                            <th class="px-4 py-3 text-center text-sm font-semibold text-gray-700">제출현황</th>
+                            <th class="px-4 py-3 text-center text-sm font-semibold text-gray-700">상태</th>
+                            <th class="px-4 py-3 text-center text-sm font-semibold text-gray-700">작업</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-gray-200">
+                        ${assignments.map(a => {
+                            const deadline = a.deadline ? new Date(a.deadline) : null;
+                            const isOverdue = deadline && deadline < new Date();
+                            const deadlineStr = deadline ? deadline.toLocaleString('ko-KR', {
+                                month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
+                            }) : '-';
+
+                            return `
+                                <tr class="hover:bg-gray-50">
+                                    <td class="px-4 py-3">
+                                        <div class="font-medium text-gray-800">${a.title}</div>
+                                        <div class="text-xs text-gray-500">${a.exam_bank_name || ''}</div>
+                                    </td>
+                                    <td class="px-4 py-3 text-sm text-gray-600">${a.course_name || a.course_code}</td>
+                                    <td class="px-4 py-3 text-center text-sm ${isOverdue ? 'text-red-600' : 'text-gray-600'}">
+                                        ${deadlineStr}
+                                        ${isOverdue ? '<br><span class="text-xs text-red-500">마감됨</span>' : ''}
+                                    </td>
+                                    <td class="px-4 py-3 text-center">
+                                        <span class="text-sm font-medium">${a.submitted_count || 0}</span>
+                                        <span class="text-gray-400">/</span>
+                                        <span class="text-sm text-gray-500">${a.total_students || '-'}</span>
+                                    </td>
+                                    <td class="px-4 py-3 text-center">
+                                        <span class="px-2 py-1 text-xs rounded-full ${statusColors[a.status] || 'bg-gray-100'}">${statusLabels[a.status] || a.status}</span>
+                                    </td>
+                                    <td class="px-4 py-3 text-center">
+                                        <div class="flex justify-center gap-1">
+                                            <button onclick="showAssignmentGrading(${a.id})" class="px-2 py-1 bg-blue-500 hover:bg-blue-600 text-white text-xs rounded" title="제출현황/채점">
+                                                <i class="fas fa-list-check"></i>
+                                            </button>
+                                            ${a.status === 'ongoing' ? `
+                                                <button onclick="closeAssignment(${a.id})" class="px-2 py-1 bg-red-500 hover:bg-red-600 text-white text-xs rounded" title="마감">
+                                                    <i class="fas fa-lock"></i>
+                                                </button>
+                                            ` : ''}
+                                            <button onclick="deleteOnlineExam(${a.id})" class="px-2 py-1 bg-gray-400 hover:bg-gray-500 text-white text-xs rounded" title="삭제">
+                                                <i class="fas fa-trash"></i>
+                                            </button>
+                                        </div>
+                                    </td>
+                                </tr>
+                            `;
+                        }).join('')}
+                    </tbody>
+                </table>
+            </div>
+        `;
+    } catch (error) {
+        console.error('과제 목록 로드 실패:', error);
+        const container = document.getElementById('assignment-list-content');
+        if (container) {
+            container.innerHTML = '<p class="text-red-500 text-center py-4">과제 목록을 불러오는데 실패했습니다.</p>';
+        }
+    }
+}
+
+async function createAssignment() {
+    // 온라인 시험 등록 모달을 열고 과제 유형을 선택
+    await showCreateOnlineExamModal();
+    // 모달이 열린 후 과제 유형 선택
+    setTimeout(() => {
+        const assignmentRadio = document.querySelector('input[name="exam-type"][value="assignment"]');
+        if (assignmentRadio) {
+            assignmentRadio.checked = true;
+            updateExamTypeUI();
+        }
+    }, 100);
+}
+
+// 과제 채점 화면
+async function showAssignmentGrading(examId) {
+    const app = document.getElementById('app');
+    app.innerHTML = `
+        <div class="bg-white rounded-lg shadow-md p-6">
+            <div class="flex justify-between items-center mb-6">
+                <h2 class="text-2xl font-bold text-gray-800">
+                    <i class="fas fa-tasks mr-2"></i>과제 채점
+                </h2>
+                <button onclick="showAssignments()" class="px-4 py-2 bg-gray-500 hover:bg-gray-600 text-white rounded-lg">
+                    <i class="fas fa-arrow-left mr-2"></i>목록으로
+                </button>
+            </div>
+            <div id="grading-content">
+                <div class="text-center py-8">
+                    <i class="fas fa-spinner fa-spin text-4xl text-gray-400"></i>
+                </div>
+            </div>
+        </div>
+    `;
+
+    await loadAssignmentGradingContent(examId);
+}
+
+async function loadAssignmentGradingContent(examId) {
+    try {
+        const response = await axios.get(`${API_BASE_URL}/api/online-exams/${examId}/monitor`);
+        const { exam, participants, stats } = response.data;
+
+        const container = document.getElementById('grading-content');
+        if (!container) return;
+
+        const deadline = exam.deadline ? new Date(exam.deadline) : null;
+        const deadlineStr = deadline ? deadline.toLocaleString('ko-KR') : '-';
+
+        container.innerHTML = `
+            <div class="mb-6 p-4 bg-gradient-to-r from-green-500 to-teal-500 text-white rounded-lg">
+                <h3 class="text-xl font-bold">${exam.title}</h3>
+                <div class="flex gap-6 mt-2 text-sm">
+                    <span><i class="fas fa-calendar-alt mr-1"></i>마감: ${deadlineStr}</span>
+                    <span><i class="fas fa-users mr-1"></i>제출: ${stats.submitted_count}/${stats.total_students}명</span>
+                </div>
+            </div>
+
+            ${participants.length === 0 ? `
+                <div class="text-center py-8 text-gray-500">
+                    <i class="fas fa-inbox text-4xl mb-4"></i>
+                    <p>아직 제출한 학생이 없습니다.</p>
+                </div>
+            ` : `
+                <form id="grading-form">
+                    <table class="min-w-full">
+                        <thead class="bg-gray-100">
+                            <tr>
+                                <th class="px-4 py-3 text-left">학생</th>
+                                <th class="px-4 py-3 text-center">제출일시</th>
+                                <th class="px-4 py-3 text-center">제출물</th>
+                                <th class="px-4 py-3 text-center" style="width: 120px;">점수 (100점)</th>
+                                <th class="px-4 py-3 text-left">피드백</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y">
+                            ${participants.map(p => {
+                                const submittedAt = p.submitted_at ? new Date(p.submitted_at).toLocaleString('ko-KR', {
+                                    month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
+                                }) : '-';
+                                const hasFile = p.file_name && p.file_path;
+                                const answerText = p.answers ? (typeof p.answers === 'string' ? p.answers : JSON.stringify(p.answers)) : '';
+
+                                return `
+                                    <tr class="hover:bg-gray-50" data-participant-id="${p.id}">
+                                        <td class="px-4 py-3">
+                                            <div class="font-medium">${p.student_name}</div>
+                                            <div class="text-xs text-gray-500">${p.student_code || ''}</div>
+                                        </td>
+                                        <td class="px-4 py-3 text-center text-sm ${p.status === 'submitted' || p.status === 'graded' ? 'text-green-600' : 'text-gray-400'}">
+                                            ${p.status === 'submitted' || p.status === 'graded' ? submittedAt : '미제출'}
+                                        </td>
+                                        <td class="px-4 py-3 text-center">
+                                            ${hasFile ? `
+                                                <a href="${API_BASE_URL}/api/assignments/download/${encodeURIComponent(p.file_name)}"
+                                                   class="text-blue-600 hover:underline text-sm" target="_blank">
+                                                    <i class="fas fa-download mr-1"></i>${p.file_name.split('_').slice(3).join('_') || p.file_name}
+                                                </a>
+                                            ` : answerText ? `
+                                                <button type="button" onclick="showAnswerText('${encodeURIComponent(answerText)}')"
+                                                        class="text-blue-600 hover:underline text-sm">
+                                                    <i class="fas fa-file-alt mr-1"></i>내용보기
+                                                </button>
+                                            ` : '<span class="text-gray-400 text-sm">-</span>'}
+                                        </td>
+                                        <td class="px-4 py-3 text-center">
+                                            <input type="number" name="score_${p.id}" value="${p.score || ''}"
+                                                   min="0" max="100" class="w-20 border rounded px-2 py-1 text-center"
+                                                   ${p.status !== 'submitted' && p.status !== 'graded' ? 'disabled' : ''}>
+                                        </td>
+                                        <td class="px-4 py-3">
+                                            <input type="text" name="feedback_${p.id}" value="${p.feedback || ''}"
+                                                   class="w-full border rounded px-2 py-1 text-sm"
+                                                   placeholder="피드백 입력..."
+                                                   ${p.status !== 'submitted' && p.status !== 'graded' ? 'disabled' : ''}>
+                                        </td>
+                                    </tr>
+                                `;
+                            }).join('')}
+                        </tbody>
+                    </table>
+
+                    <div class="mt-6 text-center">
+                        <button type="button" onclick="saveAllGrades(${examId})"
+                                class="px-8 py-3 bg-purple-600 hover:bg-purple-700 text-white rounded-lg font-semibold">
+                            <i class="fas fa-save mr-2"></i>채점 저장
+                        </button>
+                    </div>
+                </form>
+            `}
+        `;
+    } catch (error) {
+        console.error('과제 채점 정보 로드 실패:', error);
+        const container = document.getElementById('grading-content');
+        if (container) {
+            container.innerHTML = '<p class="text-red-500 text-center py-4">채점 정보를 불러오는데 실패했습니다.</p>';
+        }
+    }
+}
+
+// 답변 텍스트 보기
+window.showAnswerText = function(encodedText) {
+    const text = decodeURIComponent(encodedText);
+    showAlert(text.replace(/\\n/g, '<br>'), 'info', { title: '답변 내용' });
+};
+
+// 모든 점수 저장
+async function saveAllGrades(examId) {
+    try {
+        const grades = [];
+        document.querySelectorAll('#grading-form tr[data-participant-id]').forEach(row => {
+            const participantId = row.dataset.participantId;
+            const scoreInput = row.querySelector(`input[name="score_${participantId}"]`);
+            const feedbackInput = row.querySelector(`input[name="feedback_${participantId}"]`);
+
+            if (scoreInput && !scoreInput.disabled && scoreInput.value !== '') {
+                grades.push({
+                    participant_id: parseInt(participantId),
+                    score: parseFloat(scoreInput.value) || 0,
+                    feedback: feedbackInput?.value || ''
+                });
+            }
+        });
+
+        if (grades.length === 0) {
+            showAlert('저장할 점수가 없습니다.', 'warning');
+            return;
+        }
+
+        const response = await axios.post(`${API_BASE_URL}/api/online-exams/${examId}/grade-all-assignments`, { grades });
+
+        if (response.data.success) {
+            showAlert(response.data.message, 'success');
+            await loadAssignmentGradingContent(examId);
+        }
+    } catch (error) {
+        console.error('채점 저장 실패:', error);
+        showAlert('채점 저장에 실패했습니다.', 'error');
+    }
 }
 
 console.log('✅ 문서관리 및 문제은행 함수 로드 완료');
