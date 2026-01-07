@@ -20060,7 +20060,8 @@ window.executeDbManagement = async function() {
                             total_deleted: response.data.total_deleted,
                             backup_file: response.data.backup_file
                         });
-                        await Promise.all([refreshBackupList(), loadDbManagementLogs()]);
+                        // 페이지 새로고침 (모든 데이터 갱신)
+                        location.reload();
                     }
                 } catch (resetError) {
                     hideBackupProgress();
@@ -20356,7 +20357,8 @@ window.executeDbManagement = async function() {
                         backup_file: restoreTargetFile,
                         pre_restore_backup: response.data.pre_restore_backup
                     });
-                    await Promise.all([refreshBackupList(), loadDbManagementLogs()]);
+                    // 페이지 새로고침 (모든 데이터 갱신)
+                    location.reload();
                 }
             } catch (restoreError) {
                 hideRestoreProgress();
