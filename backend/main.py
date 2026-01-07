@@ -92,6 +92,16 @@ async def serve_glb_file_api(filename: str):
         print(f"[ERROR] GLB 파일 없음 (API): {filename}.glb")
         raise HTTPException(status_code=404, detail=f"GLB file not found: {filename}.glb")
 
+# README.md 파일 서빙
+@app.get("/README.md")
+async def serve_readme():
+    """README.md 파일 서빙"""
+    readme_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "README.md")
+    if os.path.exists(readme_path):
+        return FileResponse(readme_path, media_type="text/markdown; charset=utf-8")
+    else:
+        raise HTTPException(status_code=404, detail="README.md not found")
+
 
 # 데이터베이스 연결 설정 (환경 변수에서 로드)
 DB_CONFIG = {

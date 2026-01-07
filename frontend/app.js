@@ -17,6 +17,91 @@ window.addEventListener('error', function(event) {
     }
 }, true);
 
+// ==================== README 모달 ====================
+async function showReadmeModal() {
+    try {
+        // README.md 파일 로드
+        const response = await fetch('/README.md');
+        if (!response.ok) throw new Error('README.md를 찾을 수 없습니다');
+        const markdown = await response.text();
+
+        // 간단한 마크다운 -> HTML 변환
+        const html = convertMarkdownToHtml(markdown);
+
+        const modalHtml = `
+            <div id="readme-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[9999]" onclick="if(event.target.id==='readme-modal')closeReadmeModal()">
+                <div class="bg-white rounded-2xl shadow-2xl max-w-4xl w-full mx-4 max-h-[90vh] overflow-hidden flex flex-col">
+                    <div class="p-4 bg-gradient-to-r from-gray-800 to-gray-900 flex justify-between items-center">
+                        <div class="flex items-center gap-3">
+                            <i class="fab fa-github text-2xl text-white"></i>
+                            <div>
+                                <h3 class="text-lg font-bold text-white">README.md</h3>
+                                <p class="text-gray-300 text-sm">v${APP_VERSION}</p>
+                            </div>
+                        </div>
+                        <button onclick="closeReadmeModal()" class="text-white hover:text-gray-300 text-2xl">
+                            <i class="fas fa-times"></i>
+                        </button>
+                    </div>
+                    <div class="p-6 overflow-y-auto flex-1 prose prose-sm max-w-none">
+                        ${html}
+                    </div>
+                </div>
+            </div>
+        `;
+        document.body.insertAdjacentHTML('beforeend', modalHtml);
+    } catch (error) {
+        console.error('README 로드 실패:', error);
+        showAlert('README를 불러올 수 없습니다', 'error');
+    }
+}
+
+function closeReadmeModal() {
+    const modal = document.getElementById('readme-modal');
+    if (modal) modal.remove();
+}
+
+// 간단한 마크다운 -> HTML 변환
+function convertMarkdownToHtml(md) {
+    return md
+        // 코드 블록 (```로 감싼 부분)
+        .replace(/```(\w*)\n([\s\S]*?)```/g, '<pre class="bg-gray-800 text-green-400 p-4 rounded-lg overflow-x-auto text-sm"><code>$2</code></pre>')
+        // 인라인 코드
+        .replace(/`([^`]+)`/g, '<code class="bg-gray-100 px-1 py-0.5 rounded text-red-600 text-sm">$1</code>')
+        // 헤더
+        .replace(/^### (.*$)/gim, '<h3 class="text-lg font-bold mt-6 mb-2 text-gray-800 border-b pb-1">$1</h3>')
+        .replace(/^## (.*$)/gim, '<h2 class="text-xl font-bold mt-8 mb-3 text-gray-900 border-b-2 pb-2">$1</h2>')
+        .replace(/^# (.*$)/gim, '<h1 class="text-2xl font-bold mt-6 mb-4 text-gray-900">$1</h1>')
+        // 볼드/이탈릭
+        .replace(/\*\*\*(.*?)\*\*\*/g, '<strong><em>$1</em></strong>')
+        .replace(/\*\*(.*?)\*\*/g, '<strong class="font-semibold">$1</strong>')
+        .replace(/\*(.*?)\*/g, '<em>$1</em>')
+        // 링크
+        .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" class="text-blue-600 hover:underline">$1</a>')
+        // 이미지
+        .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img src="$2" alt="$1" class="max-w-full rounded-lg my-2">')
+        // 테이블
+        .replace(/\|(.+)\|/g, (match) => {
+            const cells = match.split('|').filter(c => c.trim());
+            if (cells.every(c => /^[\s-:]+$/.test(c))) return ''; // 구분선 제거
+            const cellHtml = cells.map(c => `<td class="border px-3 py-2">${c.trim()}</td>`).join('');
+            return `<tr>${cellHtml}</tr>`;
+        })
+        // 수평선
+        .replace(/^---$/gim, '<hr class="my-6 border-gray-300">')
+        // 리스트
+        .replace(/^- (.*$)/gim, '<li class="ml-4 list-disc">$1</li>')
+        .replace(/^\d+\. (.*$)/gim, '<li class="ml-4 list-decimal">$1</li>')
+        // 인용문
+        .replace(/^> (.*$)/gim, '<blockquote class="border-l-4 border-blue-500 pl-4 py-1 my-2 text-gray-600 bg-blue-50">$1</blockquote>')
+        // 줄바꿈
+        .replace(/\n\n/g, '</p><p class="my-3">')
+        .replace(/\n/g, '<br>');
+}
+
+window.showReadmeModal = showReadmeModal;
+window.closeReadmeModal = closeReadmeModal;
+
 // ==================== 로컬 캐싱 유틸리티 ====================
 const CACHE_VERSION = APP_VERSION; // 캐시 버전 (앱 버전과 동기화)
 const CACHE_DURATION = 5 * 60 * 1000; // 5분 캐시
@@ -2886,10 +2971,13 @@ document.addEventListener('DOMContentLoaded', () => {
     
     console.log('✅ 로그인 확인 완료 - 앱 로드 시작');
 
-    // 버전 배지 업데이트
+    // 버전 배지 업데이트 (클릭하면 README 표시)
     const versionBadge = document.getElementById('version-badge');
     if (versionBadge) {
         versionBadge.textContent = 'v' + APP_VERSION;
+        versionBadge.style.cursor = 'pointer';
+        versionBadge.title = '클릭하여 버전 정보 보기';
+        versionBadge.onclick = showReadmeModal;
     }
 
     // 시계 시작 (날짜/시간 및 카운트다운)
