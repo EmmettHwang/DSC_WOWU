@@ -1783,6 +1783,13 @@ function removeDashboardActivityListeners() {
     // 대시보드 활동 감지 중지 (로그 제거)
 }
 
+// 메뉴 권한 체크 헬퍼 함수
+function isMenuAllowed(menuId) {
+    // allowedMenus가 null이면 관리자 - 모든 메뉴 허용
+    if (window.allowedMenus === null || window.allowedMenus === undefined) return true;
+    return window.allowedMenus.includes(menuId);
+}
+
 // ==================== 대시보드 ====================
 async function loadDashboard() {
     window.showLoading('대시보드 데이터를 불러오는 중...');
@@ -2214,9 +2221,10 @@ async function loadDashboard() {
                     </div>
                 </div>
 
-                <!-- 상단 통계 카드 (6개 컴팩트) -->
+                <!-- 상단 통계 카드 (권한에 따라 표시) -->
                 <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2 mb-3">
                     <!-- 학생 -->
+                    ${isMenuAllowed('students') ? `
                     <div class="bg-gradient-to-br from-blue-500 to-blue-600 rounded-lg shadow p-3 text-white cursor-pointer hover:shadow-lg transition" onclick="showTab('students')">
                         <div class="flex items-center justify-between mb-1">
                             <i class="fas fa-user-graduate text-xl"></i>
@@ -2224,8 +2232,10 @@ async function loadDashboard() {
                         </div>
                         <p class="text-xs text-blue-100">${isAllCourses ? '전체' : '과정'} 학생</p>
                     </div>
-                    
+                    ` : ''}
+
                     <!-- 강사 -->
+                    ${isMenuAllowed('instructors') ? `
                     <div class="bg-gradient-to-br from-green-500 to-green-600 rounded-lg shadow p-3 text-white cursor-pointer hover:shadow-lg transition" onclick="showTab('instructors')">
                         <div class="flex items-center justify-between mb-1">
                             <i class="fas fa-chalkboard-teacher text-xl"></i>
@@ -2233,8 +2243,10 @@ async function loadDashboard() {
                         </div>
                         <p class="text-xs text-green-100">전체 강사</p>
                     </div>
-                    
+                    ` : ''}
+
                     <!-- 과정 -->
+                    ${isMenuAllowed('courses') ? `
                     <div class="bg-gradient-to-br from-purple-500 to-purple-600 rounded-lg shadow p-3 text-white cursor-pointer hover:shadow-lg transition" onclick="showTab('courses')">
                         <div class="flex items-center justify-between mb-1">
                             <i class="fas fa-school text-xl"></i>
@@ -2242,8 +2254,10 @@ async function loadDashboard() {
                         </div>
                         <p class="text-xs text-purple-100">총 과정</p>
                     </div>
-                    
+                    ` : ''}
+
                     <!-- 오늘 수업 -->
+                    ${isMenuAllowed('timetables') ? `
                     <div class="bg-gradient-to-br from-indigo-500 to-indigo-600 rounded-lg shadow p-3 text-white cursor-pointer hover:shadow-lg transition" onclick="showTab('timetables')">
                         <div class="flex items-center justify-between mb-1">
                             <i class="fas fa-calendar-day text-xl"></i>
@@ -2251,8 +2265,10 @@ async function loadDashboard() {
                         </div>
                         <p class="text-xs text-indigo-100">오늘 수업</p>
                     </div>
-                    
+                    ` : ''}
+
                     <!-- 상담 -->
+                    ${isMenuAllowed('counselings') ? `
                     <div class="bg-gradient-to-br from-orange-500 to-orange-600 rounded-lg shadow p-3 text-white cursor-pointer hover:shadow-lg transition" onclick="showTab('counselings')">
                         <div class="flex items-center justify-between mb-1">
                             <i class="fas fa-comments text-xl"></i>
@@ -2260,8 +2276,10 @@ async function loadDashboard() {
                         </div>
                         <p class="text-xs text-orange-100">오늘 (총 ${totalCourseCounselings.length}건)</p>
                     </div>
-                    
+                    ` : ''}
+
                     <!-- 팀 구성원 수 -->
+                    ${isMenuAllowed('projects') ? `
                     <div class="bg-gradient-to-br from-pink-500 to-pink-600 rounded-lg shadow p-3 text-white cursor-pointer hover:shadow-lg transition" onclick="showTab('projects')">
                         <div class="flex items-center justify-between mb-1">
                             <i class="fas fa-users text-xl"></i>
@@ -2269,11 +2287,13 @@ async function loadDashboard() {
                         </div>
                         <p class="text-xs text-pink-100">과정 팀</p>
                     </div>
+                    ` : ''}
                 </div>
                 
-                <!-- 차트 섹션 (3개 차트) -->
+                <!-- 차트 섹션 (권한에 따라 표시) -->
                 <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
-                    <!-- 진로 결정 현황 (도넛 차트) -->
+                    <!-- 진로 결정 현황 (도넛 차트) - 상담권한 -->
+                    ${isMenuAllowed('counselings') ? `
                     <div class="bg-white rounded-lg shadow p-3">
                         <h3 class="text-sm font-bold text-gray-800 mb-2 flex items-center">
                             <i class="fas fa-chart-pie mr-2 text-blue-600"></i>진로 결정 현황
@@ -2307,8 +2327,10 @@ async function loadDashboard() {
                             </div>
                         </div>
                     </div>
-                    
-                    <!-- 강사 유형별 분포 (파이 차트) -->
+                    ` : ''}
+
+                    <!-- 강사 유형별 분포 (파이 차트) - 강사관리 권한 -->
+                    ${isMenuAllowed('instructors') ? `
                     <div class="bg-white rounded-lg shadow p-3">
                         <h3 class="text-sm font-bold text-gray-800 mb-2 flex items-center">
                             <i class="fas fa-user-tie mr-2 text-green-600"></i>강사 유형별 분포
@@ -2326,8 +2348,10 @@ async function loadDashboard() {
                             `).join('')}
                         </div>
                     </div>
-                    
-                    <!-- 최근 7일 상담 추이 (라인 차트) -->
+                    ` : ''}
+
+                    <!-- 최근 7일 상담 추이 (라인 차트) - 상담권한 -->
+                    ${isMenuAllowed('counselings') ? `
                     <div class="bg-white rounded-lg shadow p-3">
                         <h3 class="text-sm font-bold text-gray-800 mb-2 flex items-center">
                             <i class="fas fa-chart-line mr-2 text-orange-600"></i>최근 7일 상담 추이 (전체 강사)
@@ -2344,6 +2368,7 @@ async function loadDashboard() {
                             </div>
                         </div>
                     </div>
+                    ` : ''}
                 </div>
                 
                 <!-- 진도율 가로 막대 그래프 -->
@@ -2409,9 +2434,10 @@ async function loadDashboard() {
                     </div>
                 </div>
                 
-                <!-- 2열 그리드 (컴팩트) -->
+                <!-- 2열 그리드 (권한에 따라 표시) -->
                 <div class="grid grid-cols-1 lg:grid-cols-2 gap-3 mb-3">
-                    <!-- 오늘의 시간표 -->
+                    <!-- 오늘의 시간표 - 시간표 권한 -->
+                    ${isMenuAllowed('timetables') ? `
                     <div class="bg-white rounded-lg shadow p-3">
                         <div class="flex items-center justify-between mb-2">
                             <h3 class="text-sm font-bold text-gray-800">
@@ -2424,8 +2450,8 @@ async function loadDashboard() {
                         <div class="space-y-1.5">
                             ${todayTimetables.length > 0 ? todayTimetables.slice(0, 5).map(t => `
                                 <div class="border-l-3 ${
-                                    t.type === 'lecture' ? 'border-blue-500' : 
-                                    t.type === 'project' ? 'border-green-500' : 
+                                    t.type === 'lecture' ? 'border-blue-500' :
+                                    t.type === 'project' ? 'border-green-500' :
                                     'border-purple-500'
                                 } bg-gray-50 rounded p-2 hover:bg-gray-100 transition">
                                     <div class="flex items-start justify-between">
@@ -2433,8 +2459,8 @@ async function loadDashboard() {
                                             <div class="flex items-center gap-1 mb-0.5">
                                                 <h4 class="font-bold text-gray-800 text-xs truncate">${t.subject_name || '과목명 없음'}</h4>
                                                 <span class="text-xs px-1 py-0.5 rounded flex-shrink-0 ${
-                                                    t.type === 'lecture' ? 'bg-blue-100 text-blue-700' : 
-                                                    t.type === 'project' ? 'bg-green-100 text-green-700' : 
+                                                    t.type === 'lecture' ? 'bg-blue-100 text-blue-700' :
+                                                    t.type === 'project' ? 'bg-green-100 text-green-700' :
                                                     'bg-purple-100 text-purple-700'
                                                 }">
                                                     ${t.type === 'lecture' ? '강의' : t.type === 'project' ? '프로젝트' : '실습'}
@@ -2458,8 +2484,10 @@ async function loadDashboard() {
                             `}
                         </div>
                     </div>
-                    
-                    <!-- 최근 상담 -->
+                    ` : ''}
+
+                    <!-- 최근 상담 - 상담 권한 -->
+                    ${isMenuAllowed('counselings') ? `
                     <div class="bg-white rounded-lg shadow p-3">
                         <div class="flex items-center justify-between mb-2">
                             <h3 class="text-sm font-bold text-gray-800">
@@ -2500,11 +2528,13 @@ async function loadDashboard() {
                             `}
                         </div>
                     </div>
+                    ` : ''}
                 </div>
-                
-                <!-- 3열 그리드 (컴팩트) -->
+
+                <!-- 3열 그리드 (권한에 따라 표시) -->
                 <div class="grid grid-cols-1 lg:grid-cols-3 gap-3">
-                    <!-- 최근 훈련일지 -->
+                    <!-- 최근 훈련일지 - 훈련일지 권한 -->
+                    ${isMenuAllowed('training-logs') ? `
                     <div class="bg-white rounded-lg shadow p-3">
                         <div class="flex items-center justify-between mb-2">
                             <h3 class="text-sm font-bold text-gray-800">
@@ -2563,8 +2593,10 @@ async function loadDashboard() {
                             `}
                         </div>
                     </div>
-                    
-                    <!-- 최근 팀 활동일지 -->
+                    ` : ''}
+
+                    <!-- 최근 팀 활동일지 - 팀관리 권한 -->
+                    ${isMenuAllowed('projects') ? `
                     <div class="bg-white rounded-lg shadow p-3">
                         <div class="flex items-center justify-between mb-2">
                             <h3 class="text-sm font-bold text-gray-800">
@@ -2595,6 +2627,7 @@ async function loadDashboard() {
                             `}
                         </div>
                     </div>
+                    ` : ''}
                     
                     <!-- 빠른 액션 (컴팩트) -->
                     <div class="bg-white rounded-lg shadow p-3">
@@ -2602,24 +2635,36 @@ async function loadDashboard() {
                             <i class="fas fa-bolt mr-2 text-yellow-600"></i>빠른 액션
                         </h3>
                         <div class="grid grid-cols-2 gap-2">
+                            ${isMenuAllowed('students') ? `
                             <button onclick="showTab('students')" class="bg-blue-50 hover:bg-blue-100 text-blue-700 font-semibold py-2 px-2 rounded text-xs transition">
                                 <i class="fas fa-user-plus mr-1"></i>학생
                             </button>
+                            ` : ''}
+                            ${isMenuAllowed('counselings') ? `
                             <button onclick="showTab('counselings')" class="bg-green-50 hover:bg-green-100 text-green-700 font-semibold py-2 px-2 rounded text-xs transition">
                                 <i class="fas fa-comment-medical mr-1"></i>상담
                             </button>
+                            ` : ''}
+                            ${isMenuAllowed('timetables') ? `
                             <button onclick="showTab('timetables')" class="bg-purple-50 hover:bg-purple-100 text-purple-700 font-semibold py-2 px-2 rounded text-xs transition">
                                 <i class="fas fa-calendar-plus mr-1"></i>시간표
                             </button>
+                            ` : ''}
+                            ${isMenuAllowed('training-logs') ? `
                             <button onclick="showTab('training-logs')" class="bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-semibold py-2 px-2 rounded text-xs transition">
                                 <i class="fas fa-clipboard-check mr-1"></i>일지
                             </button>
+                            ` : ''}
+                            ${isMenuAllowed('projects') ? `
                             <button onclick="showTab('projects')" class="bg-pink-50 hover:bg-pink-100 text-pink-700 font-semibold py-2 px-2 rounded text-xs transition">
                                 <i class="fas fa-users mr-1"></i>팀
                             </button>
+                            ` : ''}
+                            ${isMenuAllowed('instructors') ? `
                             <button onclick="showTab('instructors')" class="bg-orange-50 hover:bg-orange-100 text-orange-700 font-semibold py-2 px-2 rounded text-xs transition">
                                 <i class="fas fa-chalkboard-teacher mr-1"></i>강사
                             </button>
+                            ` : ''}
                         </div>
                     </div>
                 </div>
@@ -15078,6 +15123,7 @@ async function applyMenuPermissions() {
     // 관리자 (타입 IC-999 또는 0)는 모든 메뉴 접근 가능
     if (instructor.instructor_type === 'IC-999' || instructor.instructor_type === '0') {
         console.log('✅ 관리자 계정 - 모든 메뉴 접근 가능');
+        window.allowedMenus = null; // null = 모든 메뉴 허용
         // 모든 메뉴 버튼 활성화
         const menuButtons = document.querySelectorAll('[data-tab]');
         menuButtons.forEach(button => {
@@ -15107,7 +15153,10 @@ async function applyMenuPermissions() {
             // 구버전 permissions 객체를 배열로 변환
             allowedMenus = Object.keys(instructorType.permissions).filter(key => instructorType.permissions[key] === true);
         }
-        
+
+        // 전역으로 허용 메뉴 저장 (대시보드 등에서 사용)
+        window.allowedMenus = allowedMenus;
+
         console.log('📋 허용된 메뉴:', allowedMenus);
         
         const menuButtons = document.querySelectorAll('[data-tab]');
