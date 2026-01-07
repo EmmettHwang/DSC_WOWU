@@ -150,14 +150,14 @@
             <div class="container mx-auto px-4 py-6">
                 <div class="flex justify-between items-start">
                     <div class="flex items-center gap-4 cursor-pointer hover:opacity-80 transition-opacity" onclick="showTab('dashboard')" title="대시보드로 이동">
-                        <div class="bg-white rounded-lg px-3 py-2 flex items-center justify-center shadow-md" style="height: 80px;">
-                            <img src="/woosong-logo.png" alt="우송대학교 로고" class="h-full w-auto object-contain">
+                        <div class="bg-white rounded-lg px-3 py-2 flex items-center justify-center shadow-md" style="height: 80px; max-width: 200px;">
+                            <img id="header-logo" src="" alt="로고" class="max-h-full max-w-full object-contain" style="display:none;">
                         </div>
                         <div>
                             <h1 id="system-title-header" class="text-3xl font-bold flex items-center">
                                 <i class="fas fa-school mr-3"></i>
-                                바이오헬스교육관리시스템
-                                <span class="ml-3 text-sm font-normal bg-blue-500 text-white px-2 py-1 rounded">v2.0.120</span>
+                                <span id="system-title-text">로딩중...</span>
+                                <span id="version-badge" class="ml-3 text-sm font-normal px-2 py-1 rounded" style="background: rgba(255,255,255,0.2); backdrop-filter: blur(4px);">v1.0.0</span>
                             </h1>
                             <p id="system-subtitle1-header" class="text-blue-100 mt-1">보건복지부(한국보건산업진흥원), KDT, 우송대학교산학협력단</p>
                             <p id="system-subtitle2-header" class="text-blue-100">바이오헬스아카데미 올인원테크 이노베이터</p>
@@ -181,11 +181,11 @@
                         </div>
                         
                         <!-- 하단: 날짜/시간 + 카운트다운 바 (얇게) -->
-                        <div class="flex items-center justify-between bg-blue-500 bg-opacity-50 rounded px-3 py-1 border border-blue-400">
+                        <div id="datetime-container" class="flex items-center justify-between rounded px-3 py-1" style="background: rgba(255,255,255,0.15); border: 1px solid rgba(255,255,255,0.25);">
                             <span class="text-white text-xs" id="currentDateTime">
                                 <i class="fas fa-calendar-day mr-1"></i>로딩 중...
                             </span>
-                            <span class="text-blue-100 text-xs" id="refreshCountdownContainer" style="display: none;">
+                            <span class="text-white text-opacity-80 text-xs" id="refreshCountdownContainer" style="display: none;">
                                 <i class="fas fa-sync-alt mr-1"></i>새로고침: <span id="refresh-countdown" class="font-mono text-white">--:--</span>
                             </span>
                         </div>
@@ -193,6 +193,42 @@
                 </div>
             </div>
         </header>
+
+        <!-- 시스템 설정 즉시 로드 -->
+        <script>
+            (async function() {
+                try {
+                    const response = await fetch('/api/system-settings');
+                    const settings = await response.json();
+
+                    // 로고 즉시 표시
+                    const logo = document.getElementById('header-logo');
+                    if (logo && settings.logo_url) {
+                        if (settings.logo_url.startsWith('ftp://')) {
+                            logo.src = '/api/download-image?url=' + encodeURIComponent(settings.logo_url);
+                        } else {
+                            logo.src = settings.logo_url;
+                        }
+                        logo.style.display = '';
+                    }
+
+                    // 제목 즉시 표시
+                    const titleText = document.getElementById('system-title-text');
+                    if (titleText) {
+                        titleText.textContent = settings.system_title || '바이오헬스교육관리시스템';
+                    }
+
+                    // 부제목 표시
+                    const sub1 = document.getElementById('system-subtitle1-header');
+                    const sub2 = document.getElementById('system-subtitle2-header');
+                    if (sub1) sub1.textContent = settings.system_subtitle1 || '';
+                    if (sub2) sub2.textContent = settings.system_subtitle2 || '';
+
+                } catch (e) {
+                    console.log('시스템 설정 로드 중...');
+                }
+            })();
+        </script>
 
         <!-- 네비게이션 탭 (2단 메뉴) -->
         <nav class="bg-white shadow-md relative z-40">
@@ -594,7 +630,7 @@
     </script>
     
     <!-- 캐시 버스팅을 위한 버전 쿼리 -->
-    <script src="/app.js?v=2.0.280"></script>
+    <script src="/app.js?v=1.0.2"></script>
     
     <!-- 3D 모듈 (Three.js) -->
     <script type="importmap">
