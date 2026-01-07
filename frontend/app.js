@@ -18756,7 +18756,7 @@ if (document.readyState === 'loading') {
     window.restoreBGMSettings(); // BGM 설정 복원 (헤더)
 }
 
-// ==================== DB 백업 관리 ====================
+// ==================== DB 관리 ====================
 async function loadBackupManager() {
     const content = document.getElementById('content');
     content.innerHTML = `
@@ -18765,47 +18765,325 @@ async function loadBackupManager() {
                 <div class="flex items-center justify-between mb-6">
                     <h2 class="text-2xl font-bold text-gray-800">
                         <i class="fas fa-database mr-2 text-blue-600"></i>
-                        데이터베이스 백업 관리
+                        데이터베이스 관리
                     </h2>
-                    <button onclick="createBackupNow()" class="btn-primary px-6 py-2 rounded-lg">
-                        <i class="fas fa-plus mr-2"></i>백업 생성
-                    </button>
+                </div>
+
+                <!-- DB 관리 버튼 영역 -->
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+                    <!-- DB 백업 카드 -->
+                    <div class="bg-gradient-to-br from-blue-50 to-blue-100 border border-blue-200 rounded-xl p-6">
+                        <div class="flex items-center mb-4">
+                            <div class="w-12 h-12 bg-blue-500 rounded-full flex items-center justify-center mr-4">
+                                <i class="fas fa-download text-white text-xl"></i>
+                            </div>
+                            <div>
+                                <h3 class="text-lg font-bold text-blue-800">DB 백업</h3>
+                                <p class="text-sm text-blue-600">현재 데이터를 안전하게 백업합니다</p>
+                            </div>
+                        </div>
+                        <button onclick="openDbManagementModal('backup')"
+                            class="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-4 rounded-lg transition-colors">
+                            <i class="fas fa-play mr-2"></i>백업 실행
+                        </button>
+                    </div>
+
+                    <!-- DB 초기화 카드 -->
+                    <div class="bg-gradient-to-br from-red-50 to-red-100 border border-red-200 rounded-xl p-6">
+                        <div class="flex items-center mb-4">
+                            <div class="w-12 h-12 bg-red-500 rounded-full flex items-center justify-center mr-4">
+                                <i class="fas fa-exclamation-triangle text-white text-xl"></i>
+                            </div>
+                            <div>
+                                <h3 class="text-lg font-bold text-red-800">DB 초기화</h3>
+                                <p class="text-sm text-red-600">자동 백업 후 데이터를 초기화합니다</p>
+                            </div>
+                        </div>
+                        <button onclick="openDbManagementModal('reset')"
+                            class="w-full bg-red-600 hover:bg-red-700 text-white font-semibold py-3 px-4 rounded-lg transition-colors">
+                            <i class="fas fa-trash-alt mr-2"></i>초기화 실행
+                        </button>
+                    </div>
                 </div>
 
                 <!-- 백업 설정 -->
-                <div class="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
+                <div class="bg-gray-50 border border-gray-200 rounded-lg p-4 mb-6">
                     <h3 class="font-bold text-gray-700 mb-3">
-                        <i class="fas fa-cog mr-2"></i>백업 설정
+                        <i class="fas fa-cog mr-2"></i>백업 파일 관리
                     </h3>
                     <div class="grid grid-cols-2 gap-4">
                         <div>
                             <label class="block text-sm font-medium text-gray-700 mb-2">
                                 백업 보관 기간 (일)
                             </label>
-                            <input type="number" id="backup-keep-days" value="7" min="1" max="30" 
+                            <input type="number" id="backup-keep-days" value="7" min="1" max="30"
                                 class="w-full px-3 py-2 border rounded-lg" />
                         </div>
                         <div class="flex items-end">
                             <button onclick="cleanupOldBackups()" class="btn-secondary px-4 py-2 rounded-lg">
-                                <i class="fas fa-trash mr-2"></i>오래된 백업 정리
+                                <i class="fas fa-broom mr-2"></i>오래된 백업 정리
                             </button>
                         </div>
                     </div>
                 </div>
 
                 <!-- 백업 목록 -->
-                <div id="backup-list" class="space-y-3">
-                    <div class="text-center py-8 text-gray-500">
-                        <i class="fas fa-spinner fa-spin text-4xl mb-3"></i>
-                        <p>백업 목록을 불러오는 중...</p>
+                <div class="mb-8">
+                    <h3 class="font-bold text-gray-700 mb-3">
+                        <i class="fas fa-folder-open mr-2"></i>백업 파일 목록
+                    </h3>
+                    <div id="backup-list" class="space-y-3">
+                        <div class="text-center py-8 text-gray-500">
+                            <i class="fas fa-spinner fa-spin text-4xl mb-3"></i>
+                            <p>백업 목록을 불러오는 중...</p>
+                        </div>
                     </div>
+                </div>
+
+                <!-- 관리 로그 -->
+                <div>
+                    <h3 class="font-bold text-gray-700 mb-3">
+                        <i class="fas fa-history mr-2"></i>DB 관리 로그
+                    </h3>
+                    <div id="db-management-logs" class="overflow-x-auto">
+                        <div class="text-center py-8 text-gray-500">
+                            <i class="fas fa-spinner fa-spin text-4xl mb-3"></i>
+                            <p>로그를 불러오는 중...</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- DB 관리 인증 모달 -->
+        <div id="db-management-modal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[9999]">
+            <div class="bg-white rounded-2xl shadow-2xl max-w-md w-full mx-4">
+                <div id="db-modal-header" class="p-6 rounded-t-2xl">
+                    <div class="flex items-center gap-4">
+                        <div id="db-modal-icon" class="text-4xl"></div>
+                        <h3 id="db-modal-title" class="text-xl font-bold text-white"></h3>
+                    </div>
+                </div>
+                <div class="p-6">
+                    <p id="db-modal-desc" class="text-gray-600 mb-6"></p>
+
+                    <div class="space-y-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-2">
+                                <i class="fas fa-user mr-1"></i>강사 이름
+                            </label>
+                            <input type="text" id="db-mgmt-instructor-name"
+                                class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                placeholder="강사 이름을 입력하세요" autocomplete="off" />
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-2">
+                                <i class="fas fa-key mr-1"></i>비밀번호
+                            </label>
+                            <input type="password" id="db-mgmt-password"
+                                class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                placeholder="비밀번호를 입력하세요" autocomplete="off" />
+                        </div>
+                    </div>
+
+                    <div id="db-modal-warning" class="hidden mt-4 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
+                        <p class="text-yellow-800 text-sm">
+                            <i class="fas fa-exclamation-circle mr-1"></i>
+                            <strong>주의:</strong> DB 초기화는 시간표, 훈련일지, 학생정보, 수업일지, 상담, 공지사항, 팀 활동일지, 프로젝트 데이터를 삭제합니다.
+                            <br>과정, 과목, 강사, 휴일, 시스템 설정은 유지됩니다.
+                        </p>
+                    </div>
+                </div>
+                <div class="p-6 pt-0 flex justify-end gap-3">
+                    <button onclick="closeDbManagementModal()"
+                        class="px-6 py-2.5 bg-gray-200 hover:bg-gray-300 text-gray-800 rounded-lg font-semibold transition-colors">
+                        취소
+                    </button>
+                    <button id="db-modal-confirm-btn" onclick="executeDbManagement()"
+                        class="px-6 py-2.5 text-white rounded-lg font-semibold transition-colors">
+                        실행
+                    </button>
                 </div>
             </div>
         </div>
     `;
 
-    // 백업 목록 로드
-    await refreshBackupList();
+    // 백업 목록 및 로그 로드
+    await Promise.all([refreshBackupList(), loadDbManagementLogs()]);
+}
+
+// DB 관리 모달 상태
+let dbManagementAction = '';
+
+window.openDbManagementModal = function(action) {
+    dbManagementAction = action;
+    const modal = document.getElementById('db-management-modal');
+    const header = document.getElementById('db-modal-header');
+    const icon = document.getElementById('db-modal-icon');
+    const title = document.getElementById('db-modal-title');
+    const desc = document.getElementById('db-modal-desc');
+    const warning = document.getElementById('db-modal-warning');
+    const confirmBtn = document.getElementById('db-modal-confirm-btn');
+
+    // 입력 필드 초기화
+    document.getElementById('db-mgmt-instructor-name').value = '';
+    document.getElementById('db-mgmt-password').value = '';
+
+    if (action === 'backup') {
+        header.className = 'p-6 rounded-t-2xl bg-gradient-to-r from-blue-500 to-blue-600';
+        icon.innerHTML = '<i class="fas fa-download text-white"></i>';
+        title.textContent = 'DB 백업 실행';
+        desc.textContent = '데이터베이스를 백업하려면 강사 이름과 비밀번호를 입력해주세요. 작업 내역은 로그에 기록됩니다.';
+        warning.classList.add('hidden');
+        confirmBtn.className = 'px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-semibold transition-colors';
+        confirmBtn.innerHTML = '<i class="fas fa-download mr-2"></i>백업 실행';
+    } else if (action === 'reset') {
+        header.className = 'p-6 rounded-t-2xl bg-gradient-to-r from-red-500 to-red-600';
+        icon.innerHTML = '<i class="fas fa-exclamation-triangle text-white"></i>';
+        title.textContent = 'DB 초기화 실행';
+        desc.textContent = '데이터베이스를 초기화하려면 강사 이름과 비밀번호를 입력해주세요. 초기화 전 자동으로 백업이 생성됩니다.';
+        warning.classList.remove('hidden');
+        confirmBtn.className = 'px-6 py-2.5 bg-red-600 hover:bg-red-700 text-white rounded-lg font-semibold transition-colors';
+        confirmBtn.innerHTML = '<i class="fas fa-trash-alt mr-2"></i>초기화 실행';
+    }
+
+    modal.classList.remove('hidden');
+    document.getElementById('db-mgmt-instructor-code').focus();
+};
+
+window.closeDbManagementModal = function() {
+    document.getElementById('db-management-modal').classList.add('hidden');
+    dbManagementAction = '';
+};
+
+window.executeDbManagement = async function() {
+    const instructorName = document.getElementById('db-mgmt-instructor-name').value.trim();
+    const password = document.getElementById('db-mgmt-password').value.trim();
+
+    if (!instructorName || !password) {
+        showAlert('강사 이름과 비밀번호를 모두 입력해주세요.', 'warning');
+        return;
+    }
+
+    // 인증 확인
+    try {
+        showLoading('인증 확인 중...');
+        const verifyRes = await axios.post(`${API_BASE_URL}/api/db-management/verify`, {
+            instructor_name: instructorName,
+            password: password
+        });
+
+        if (!verifyRes.data.success) {
+            hideLoading();
+            showAlert(verifyRes.data.message, 'error');
+            return;
+        }
+
+        const operatorName = verifyRes.data.instructor_name;
+        const operatorCode = verifyRes.data.instructor_code;
+
+        closeDbManagementModal();
+
+        if (dbManagementAction === 'backup') {
+            // 백업 실행
+            showLoading('백업 생성 중...');
+            const response = await axios.post(`${API_BASE_URL}/api/db-management/backup-with-log`, {
+                operator_name: operatorName,
+                instructor_code: operatorCode
+            });
+            hideLoading();
+
+            if (response.data.success) {
+                showAlert(`백업 생성 완료!\n\n작업자: ${operatorName}\n총 레코드: ${response.data.total_records}개\n파일 크기: ${(response.data.file_size / 1024 / 1024).toFixed(2)} MB\n파일명: ${response.data.backup_file}`, 'success', { title: 'DB 백업 완료' });
+                await Promise.all([refreshBackupList(), loadDbManagementLogs()]);
+            }
+        } else if (dbManagementAction === 'reset') {
+            // 최종 확인
+            const confirmed = await showConfirm(`정말로 DB를 초기화하시겠습니까?\n\n작업자: ${operatorName}\n\n이 작업은 되돌릴 수 없습니다.\n(백업 파일에서 수동 복원 필요)`, 'DB 초기화 최종 확인');
+
+            if (confirmed) {
+                showLoading('백업 생성 후 초기화 중...');
+                const response = await axios.post(`${API_BASE_URL}/api/db-management/reset`, {
+                    operator_name: operatorName,
+                    instructor_code: operatorCode
+                });
+                hideLoading();
+
+                if (response.data.success) {
+                    showAlert(`DB 초기화 완료!\n\n작업자: ${operatorName}\n삭제된 레코드: ${response.data.total_deleted}개\n백업 파일: ${response.data.backup_file}`, 'success', { title: 'DB 초기화 완료' });
+                    await Promise.all([refreshBackupList(), loadDbManagementLogs()]);
+                }
+            }
+        }
+    } catch (error) {
+        hideLoading();
+        console.error('DB 관리 작업 실패:', error);
+        showAlert(error.response?.data?.detail || 'DB 관리 작업에 실패했습니다.', 'error');
+    }
+};
+
+async function loadDbManagementLogs() {
+    try {
+        const response = await axios.get(`${API_BASE_URL}/api/db-management/logs?limit=20`);
+        const logs = response.data.logs;
+        const container = document.getElementById('db-management-logs');
+
+        if (!logs || logs.length === 0) {
+            container.innerHTML = `
+                <div class="text-center py-6 text-gray-500">
+                    <i class="fas fa-clipboard-list text-3xl mb-2"></i>
+                    <p>관리 로그가 없습니다</p>
+                </div>
+            `;
+            return;
+        }
+
+        container.innerHTML = `
+            <table class="min-w-full divide-y divide-gray-200">
+                <thead class="bg-gray-50">
+                    <tr>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">작업시간</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">작업유형</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">작업자</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">결과</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">백업파일</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">상세</th>
+                    </tr>
+                </thead>
+                <tbody class="bg-white divide-y divide-gray-200">
+                    ${logs.map(log => {
+                        const date = new Date(log.created_at);
+                        const dateStr = date.toLocaleString('ko-KR');
+                        const actionLabel = log.action_type === 'backup' ?
+                            '<span class="px-2 py-1 bg-blue-100 text-blue-800 rounded text-xs font-semibold">백업</span>' :
+                            '<span class="px-2 py-1 bg-red-100 text-red-800 rounded text-xs font-semibold">초기화</span>';
+                        const resultLabel = log.action_result === 'success' ?
+                            '<span class="px-2 py-1 bg-green-100 text-green-800 rounded text-xs font-semibold">성공</span>' :
+                            '<span class="px-2 py-1 bg-red-100 text-red-800 rounded text-xs font-semibold">실패</span>';
+
+                        return `
+                            <tr class="hover:bg-gray-50">
+                                <td class="px-4 py-3 text-sm text-gray-600">${dateStr}</td>
+                                <td class="px-4 py-3">${actionLabel}</td>
+                                <td class="px-4 py-3 text-sm text-gray-800">${log.operator_name}</td>
+                                <td class="px-4 py-3">${resultLabel}</td>
+                                <td class="px-4 py-3 text-sm text-gray-600">${log.backup_file || '-'}</td>
+                                <td class="px-4 py-3 text-sm text-gray-500 max-w-xs truncate" title="${log.details || ''}">${log.details || '-'}</td>
+                            </tr>
+                        `;
+                    }).join('')}
+                </tbody>
+            </table>
+        `;
+    } catch (error) {
+        console.error('관리 로그 로드 실패:', error);
+        document.getElementById('db-management-logs').innerHTML = `
+            <div class="text-center py-6 text-red-500">
+                <i class="fas fa-exclamation-circle text-3xl mb-2"></i>
+                <p>로그를 불러오는데 실패했습니다</p>
+            </div>
+        `;
+    }
 }
 
 async function refreshBackupList() {
@@ -18814,7 +19092,7 @@ async function refreshBackupList() {
         const backups = response.data.backups;
 
         const listContainer = document.getElementById('backup-list');
-        
+
         if (backups.length === 0) {
             listContainer.innerHTML = `
                 <div class="text-center py-8 text-gray-500">
@@ -18844,7 +19122,7 @@ async function refreshBackupList() {
                         </div>
                     </div>
                     <div class="flex space-x-2">
-                        <button onclick="deleteBackup('${backup.filename}')" 
+                        <button onclick="deleteBackup('${backup.filename}')"
                             class="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600">
                             <i class="fas fa-trash mr-1"></i>삭제
                         </button>
@@ -18859,32 +19137,9 @@ async function refreshBackupList() {
     }
 }
 
-async function createBackupNow() {
-    if (!confirm('현재 데이터베이스의 백업을 생성하시겠습니까?')) {
-        return;
-    }
-
-    try {
-        showLoading('백업 생성 중...');
-        const response = await axios.post(`${API_BASE_URL}/api/backup/create`);
-        
-        hideLoading();
-        
-        if (response.data.success) {
-            showAlert(`백업 생성 완료!\n총 레코드: ${response.data.total_records}개\n파일 크기: ${(response.data.file_size / 1024 / 1024).toFixed(2)} MB`, 'success');
-            await refreshBackupList();
-        }
-    } catch (error) {
-        hideLoading();
-        console.error('백업 생성 실패:', error);
-        showAlert('백업 생성에 실패했습니다', 'error');
-    }
-}
-
 async function deleteBackup(filename) {
-    if (!confirm(`백업 파일 "${filename}"을(를) 삭제하시겠습니까?`)) {
-        return;
-    }
+    const confirmed = await showConfirm(`백업 파일 "${filename}"을(를) 삭제하시겠습니까?`, '백업 파일 삭제');
+    if (!confirmed) return;
 
     try {
         await axios.delete(`${API_BASE_URL}/api/backup/delete/${filename}`);
@@ -18898,16 +19153,15 @@ async function deleteBackup(filename) {
 
 async function cleanupOldBackups() {
     const keepDays = parseInt(document.getElementById('backup-keep-days').value);
-    
-    if (!confirm(`${keepDays}일 이전의 백업 파일을 모두 삭제하시겠습니까?`)) {
-        return;
-    }
+
+    const confirmed = await showConfirm(`${keepDays}일 이전의 백업 파일을 모두 삭제하시겠습니까?`, '오래된 백업 정리');
+    if (!confirmed) return;
 
     try {
         showLoading('오래된 백업 정리 중...');
         const response = await axios.post(`${API_BASE_URL}/api/backup/auto-cleanup?keep_days=${keepDays}`);
         hideLoading();
-        
+
         showAlert(response.data.message, 'success');
         await refreshBackupList();
     } catch (error) {

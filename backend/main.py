@@ -180,11 +180,11 @@ FTP_CONFIG = {
 
 # FTP 경로 설정
 FTP_PATHS = {
-    'guidance': '/homes/ha/camFTP/BH2025/guidance',  # 상담일지
-    'train': '/homes/ha/camFTP/BH2025/train',        # 훈련일지
-    'student': '/homes/ha/camFTP/BH2025/student',    # 학생
-    'teacher': '/homes/ha/camFTP/BH2025/teacher',    # 강사
-    'team': '/homes/ha/camFTP/BH2025/team'           # 팀(프로젝트)
+    'guidance': '/home/minilms_ftp/minilms/guidance',  # 상담일지
+    'train': '/home/minilms_ftp/minilms/train',        # 훈련일지
+    'student': '/home/minilms_ftp/minilms/student',    # 학생
+    'teacher': '/home/minilms_ftp/minilms/teacher',    # 강사
+    'team': '/home/minilms_ftp/minilms/team'           # 팀(프로젝트)
 }
 
 def create_thumbnail(file_data: bytes, filename: str) -> str:
@@ -4694,9 +4694,9 @@ async def upload_image(
                 detail=f"허용되지 않는 파일 형식입니다. 허용 형식: {', '.join(allowed_extensions)}"
             )
         
-        # 파일 크기 체크 (100MB 제한 - 메모리에 올리지 않고 크기만 확인)
-        await file.seek(0, 2)  # 파일 끝으로 이동
-        file_size = await file.tell()  # 현재 위치 = 파일 크기
+        # 파일 크기 체크 (100MB 제한)
+        contents = await file.read()
+        file_size = len(contents)
         await file.seek(0)  # 파일 처음으로 되돌림
         
         if file_size > 100 * 1024 * 1024:
@@ -7228,35 +7228,307 @@ async def auto_cleanup_backups(keep_days: int = 7):
     """오래된 백업 자동 삭제 (keep_days일 이전 백업)"""
     import os
     from datetime import datetime, timedelta
-    
+
     backup_dir = '/home/user/webapp/backend/backups'
-    
+
     try:
         if not os.path.exists(backup_dir):
             return {"deleted_count": 0, "message": "백업 디렉토리 없음"}
-        
+
         cutoff_time = datetime.now() - timedelta(days=keep_days)
         deleted_count = 0
-        
+
         for filename in os.listdir(backup_dir):
             if filename.startswith('db_backup_') and filename.endswith('.json'):
                 filepath = os.path.join(backup_dir, filename)
                 file_time = datetime.fromtimestamp(os.path.getmtime(filepath))
-                
+
                 if file_time < cutoff_time:
                     os.remove(filepath)
                     deleted_count += 1
                     print(f"🗑️ 삭제: {filename}")
-        
+
         return {
             "success": True,
             "deleted_count": deleted_count,
             "keep_days": keep_days,
             "message": f"{keep_days}일 이전 백업 {deleted_count}개 삭제 완료"
         }
-        
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"자동 정리 실패: {str(e)}")
+
+
+# ==================== DB 관리 로그 API ====================
+
+def ensure_db_management_logs_table():
+    """DB 관리 로그 테이블 생성 (없으면)"""
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS db_management_logs (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                action_type VARCHAR(50) NOT NULL COMMENT '작업 유형 (backup/reset)',
+                operator_name VARCHAR(100) NOT NULL COMMENT '작업자 이름',
+                action_result VARCHAR(20) NOT NULL COMMENT '결과 (success/fail)',
+                backup_file VARCHAR(255) COMMENT '백업 파일명',
+                details TEXT COMMENT '상세 내용',
+                ip_address VARCHAR(45) COMMENT 'IP 주소',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '작업 시간'
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='DB 관리 로그'
+        """)
+        conn.commit()
+    finally:
+        conn.close()
+
+# 서버 시작 시 테이블 확인
+ensure_db_management_logs_table()
+
+
+@app.post("/api/db-management/verify")
+async def verify_db_management_credentials(request: Request, data: dict):
+    """DB 관리 접속 검증 (강사 이름과 비밀번호 확인)"""
+    instructor_name = data.get('instructor_name', '').strip()
+    password = data.get('password', '').strip()
+
+    if not instructor_name or not password:
+        return {"success": False, "message": "강사 이름과 비밀번호를 입력해주세요."}
+
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor(pymysql.cursors.DictCursor)
+
+        # 강사 이름과 비밀번호 확인
+        cursor.execute("""
+            SELECT code, name, password FROM instructors WHERE name = %s
+        """, (instructor_name,))
+        instructor = cursor.fetchone()
+
+        if not instructor:
+            return {"success": False, "message": "존재하지 않는 강사 이름입니다."}
+
+        if instructor['password'] != password:
+            return {"success": False, "message": "비밀번호가 올바르지 않습니다."}
+
+        return {
+            "success": True,
+            "message": "인증 성공",
+            "instructor_name": instructor['name'],
+            "instructor_code": instructor['code']
+        }
+    finally:
+        conn.close()
+
+
+@app.post("/api/db-management/backup-with-log")
+async def create_backup_with_log(request: Request, data: dict):
+    """백업 생성 및 로그 기록"""
+    import json
+    from datetime import datetime, date, timedelta
+
+    operator_name = data.get('operator_name', '')
+    instructor_code = data.get('instructor_code', '')
+
+    if not operator_name:
+        raise HTTPException(status_code=400, detail="작업자 정보가 필요합니다")
+
+    # 클라이언트 IP 가져오기
+    client_ip = request.client.host if request.client else 'unknown'
+
+    def convert_to_json_serializable(obj):
+        if isinstance(obj, (datetime, date)):
+            return obj.isoformat()
+        elif isinstance(obj, timedelta):
+            return str(obj)
+        elif obj is None:
+            return None
+        return obj
+
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor(pymysql.cursors.DictCursor)
+
+        backup_data = {}
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+
+        tables = [
+            'timetables', 'training_logs', 'courses', 'subjects',
+            'instructors', 'students', 'course_subjects', 'holidays',
+            'projects', 'class_notes', 'consultations', 'notices',
+            'system_settings', 'team_activity_logs', 'db_management_logs'
+        ]
+
+        total_records = 0
+        for table in tables:
+            try:
+                cursor.execute(f"SELECT * FROM {table}")
+                rows = cursor.fetchall()
+
+                serializable_rows = []
+                for row in rows:
+                    serializable_row = {k: convert_to_json_serializable(v) for k, v in row.items()}
+                    serializable_rows.append(serializable_row)
+
+                backup_data[table] = serializable_rows
+                total_records += len(rows)
+            except Exception as e:
+                print(f"[WARN] {table} 백업 실패: {e}")
+                backup_data[table] = []
+
+        backup_dir = '/home/user/webapp/backend/backups'
+        os.makedirs(backup_dir, exist_ok=True)
+
+        backup_file = f'db_backup_{timestamp}.json'
+        backup_path = f'{backup_dir}/{backup_file}'
+        with open(backup_path, 'w', encoding='utf-8') as f:
+            json.dump(backup_data, f, ensure_ascii=False, indent=2)
+
+        file_size = os.path.getsize(backup_path)
+
+        # 로그 기록
+        cursor.execute("""
+            INSERT INTO db_management_logs
+            (action_type, operator_name, action_result, backup_file, details, ip_address)
+            VALUES (%s, %s, %s, %s, %s, %s)
+        """, (
+            'backup',
+            f"{operator_name} ({instructor_code})",
+            'success',
+            backup_file,
+            f"총 {total_records}개 레코드, {file_size / 1024 / 1024:.2f}MB",
+            client_ip
+        ))
+        conn.commit()
+
+        return {
+            "success": True,
+            "backup_file": backup_file,
+            "total_records": total_records,
+            "file_size": file_size,
+            "timestamp": timestamp,
+            "tables": {table: len(backup_data[table]) for table in tables}
+        }
+
+    except Exception as e:
+        # 실패 로그 기록
+        try:
+            cursor.execute("""
+                INSERT INTO db_management_logs
+                (action_type, operator_name, action_result, details, ip_address)
+                VALUES (%s, %s, %s, %s, %s)
+            """, ('backup', f"{operator_name} ({instructor_code})", 'fail', str(e), client_ip))
+            conn.commit()
+        except:
+            pass
+        raise HTTPException(status_code=500, detail=f"백업 생성 실패: {str(e)}")
+    finally:
+        conn.close()
+
+
+@app.post("/api/db-management/reset")
+async def reset_database(request: Request, data: dict):
+    """DB 초기화 (백업 후 진행)"""
+    import json
+    from datetime import datetime, date, timedelta
+
+    operator_name = data.get('operator_name', '')
+    instructor_code = data.get('instructor_code', '')
+
+    if not operator_name:
+        raise HTTPException(status_code=400, detail="작업자 정보가 필요합니다")
+
+    client_ip = request.client.host if request.client else 'unknown'
+
+    # 먼저 백업 생성
+    backup_result = await create_backup_with_log(request, data)
+
+    if not backup_result.get('success'):
+        raise HTTPException(status_code=500, detail="백업 생성 실패로 초기화를 중단합니다")
+
+    backup_file = backup_result.get('backup_file', '')
+
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+
+        # 초기화할 테이블 목록 (시스템 설정, 강사 정보, 로그는 유지)
+        tables_to_clear = [
+            'timetables', 'training_logs', 'students',
+            'class_notes', 'consultations', 'notices',
+            'team_activity_logs', 'projects', 'course_subjects'
+        ]
+
+        deleted_counts = {}
+        for table in tables_to_clear:
+            try:
+                cursor.execute(f"SELECT COUNT(*) as cnt FROM {table}")
+                count = cursor.fetchone()[0]
+                cursor.execute(f"DELETE FROM {table}")
+                deleted_counts[table] = count
+            except Exception as e:
+                print(f"[WARN] {table} 초기화 실패: {e}")
+                deleted_counts[table] = 0
+
+        conn.commit()
+
+        total_deleted = sum(deleted_counts.values())
+
+        # 로그 기록
+        cursor.execute("""
+            INSERT INTO db_management_logs
+            (action_type, operator_name, action_result, backup_file, details, ip_address)
+            VALUES (%s, %s, %s, %s, %s, %s)
+        """, (
+            'reset',
+            f"{operator_name} ({instructor_code})",
+            'success',
+            backup_file,
+            f"총 {total_deleted}개 레코드 삭제. 테이블: {', '.join(tables_to_clear)}",
+            client_ip
+        ))
+        conn.commit()
+
+        return {
+            "success": True,
+            "message": "DB 초기화 완료",
+            "backup_file": backup_file,
+            "deleted_counts": deleted_counts,
+            "total_deleted": total_deleted
+        }
+
+    except Exception as e:
+        conn.rollback()
+        # 실패 로그 기록
+        try:
+            cursor.execute("""
+                INSERT INTO db_management_logs
+                (action_type, operator_name, action_result, backup_file, details, ip_address)
+                VALUES (%s, %s, %s, %s, %s, %s)
+            """, ('reset', f"{operator_name} ({instructor_code})", 'fail', backup_file, str(e), client_ip))
+            conn.commit()
+        except:
+            pass
+        raise HTTPException(status_code=500, detail=f"DB 초기화 실패: {str(e)}")
+    finally:
+        conn.close()
+
+
+@app.get("/api/db-management/logs")
+async def get_db_management_logs(limit: int = 50):
+    """DB 관리 로그 조회"""
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor(pymysql.cursors.DictCursor)
+        cursor.execute("""
+            SELECT * FROM db_management_logs
+            ORDER BY created_at DESC
+            LIMIT %s
+        """, (limit,))
+        logs = cursor.fetchall()
+        return {"logs": logs}
+    finally:
+        conn.close()
 
 if __name__ == "__main__":
     import uvicorn
