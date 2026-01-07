@@ -3425,9 +3425,15 @@ window.showStudentForm = async function(studentId = null) {
                            class="w-full px-3 py-2 border rounded-lg">
                 </div>
                 <div>
-                    <label class="block text-gray-700 mb-2">캠퍼스</label>
-                    <input type="text" name="campus" value="${student?.campus || ''}" 
-                           class="w-full px-3 py-2 border rounded-lg">
+                    <label class="block text-gray-700 mb-2">캠퍼스(과정)</label>
+                    <select name="campus" class="w-full px-3 py-2 border rounded-lg">
+                        <option value="">선택</option>
+                        ${courses.sort((a, b) => (a.name || a.code).localeCompare(b.name || b.code, 'ko')).map(c => `
+                            <option value="${c.name || c.code}" ${student?.campus === (c.name || c.code) ? 'selected' : ''}>
+                                ${c.name || c.code}
+                            </option>
+                        `).join('')}
+                    </select>
                 </div>
                 <div>
                     <label class="block text-gray-700 mb-2">과정 선택</label>
