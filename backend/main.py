@@ -5837,14 +5837,49 @@ async def update_system_settings(
         
         conn.commit()
         print(f"[OK] {update_count}개 설정 업데이트 완료")
-        
+
+        # 로고가 변경되면 OG 이미지로 복사
+        if logo_url:
+            try:
+                og_image_path = os.path.join(os.path.dirname(__file__), '..', 'frontend', 'og-image.png')
+
+                if logo_url.startswith('ftp://'):
+                    # FTP URL인 경우 직접 FTP에서 다운로드
+                    url_parts = logo_url.replace('ftp://', '').split('/', 1)
+                    file_path = url_parts[1] if len(url_parts) > 1 else ''
+
+                    ftp = FTP()
+                    ftp.encoding = 'utf-8'
+                    ftp.connect(FTP_CONFIG['host'], FTP_CONFIG['port'])
+                    ftp.login(FTP_CONFIG['user'], FTP_CONFIG['passwd'])
+
+                    file_data = io.BytesIO()
+                    ftp.retrbinary(f'RETR /{file_path}', file_data.write)
+                    ftp.quit()
+
+                    with open(og_image_path, 'wb') as f:
+                        f.write(file_data.getvalue())
+                    print(f"[OK] OG 이미지 FTP 다운로드 완료: {og_image_path}")
+                else:
+                    # 일반 URL인 경우 직접 다운로드
+                    import requests
+                    response = requests.get(logo_url, timeout=10)
+                    if response.status_code == 200:
+                        with open(og_image_path, 'wb') as f:
+                            f.write(response.content)
+                        print(f"[OK] OG 이미지 저장 완료: {og_image_path}")
+                    else:
+                        print(f"[WARN] OG 이미지 다운로드 실패: {response.status_code}")
+            except Exception as og_err:
+                print(f"[WARN] OG 이미지 복사 실패: {og_err}")
+
         # 저장된 데이터 확인
         cursor.execute("SELECT setting_key, setting_value FROM system_settings")
         saved_data = cursor.fetchall()
         print(f"[STAT] 현재 DB 상태:")
         for row in saved_data:
             print(f"  - {row[0]}: {row[1]}")
-        
+
         return {"message": "시스템 설정이 업데이트되었습니다", "updated_count": update_count}
     except Exception as e:
         conn.rollback()
