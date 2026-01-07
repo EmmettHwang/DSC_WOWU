@@ -4,10 +4,51 @@ const API_BASE_URL = '';
 window.API_BASE_URL = API_BASE_URL; // 전역으로 노출
 
 // ==================== 앱 버전 및 기본값 관리 ====================
-const APP_VERSION = '1.1.202601080110'; // 앱 버전 (v메이저.마이너.년월일시분)
+let APP_VERSION = 'loading...'; // 앱 버전 (README.md에서 자동 로드)
 const DEFAULT_SYSTEM_TITLE = '교육관리시스템'; // 기본 시스템 제목
 window.APP_VERSION = APP_VERSION;
 window.DEFAULT_SYSTEM_TITLE = DEFAULT_SYSTEM_TITLE;
+
+// README.md에서 버전 자동 로드
+async function loadVersionFromReadme() {
+    try {
+        const response = await fetch('/api/version');
+        const data = await response.json();
+        APP_VERSION = data.version || 'unknown';
+        window.APP_VERSION = APP_VERSION;
+
+        // 버전 배지 업데이트
+        const versionBadge = document.getElementById('version-badge');
+        if (versionBadge) {
+            versionBadge.textContent = 'v' + APP_VERSION;
+        }
+
+        // 캐시 버전 체크
+        checkAndClearCache();
+
+        console.log(`📦 버전 로드됨: v${APP_VERSION}`);
+    } catch (error) {
+        console.error('버전 로드 실패:', error);
+        APP_VERSION = 'error';
+    }
+}
+
+// 버전 로드 시 캐시 체크
+function checkAndClearCache() {
+    const currentVersion = localStorage.getItem('cache_version');
+    if (currentVersion !== APP_VERSION) {
+        console.log(`🔄 캐시 버전 업데이트: ${currentVersion} → ${APP_VERSION}`);
+        Object.keys(localStorage).forEach(k => {
+            if (k.startsWith('cache_')) {
+                localStorage.removeItem(k);
+            }
+        });
+        localStorage.setItem('cache_version', APP_VERSION);
+    }
+}
+
+// 페이지 로드 시 버전 로드
+loadVersionFromReadme();
 
 // YouTube API cross-origin 에러 무시 (sandbox 환경)
 window.addEventListener('error', function(event) {
@@ -103,24 +144,8 @@ window.showReadmeModal = showReadmeModal;
 window.closeReadmeModal = closeReadmeModal;
 
 // ==================== 로컬 캐싱 유틸리티 ====================
-const CACHE_VERSION = APP_VERSION; // 캐시 버전 (앱 버전과 동기화)
 const CACHE_DURATION = 5 * 60 * 1000; // 5분 캐시
-
-// 캐시 버전 체크 및 초기화
-(function checkCacheVersion() {
-    const currentVersion = localStorage.getItem('cache_version');
-    if (currentVersion !== CACHE_VERSION) {
-        console.log(`🔄 캐시 버전 업데이트: ${currentVersion} → ${CACHE_VERSION}`);
-        // 전체 캐시 삭제
-        Object.keys(localStorage).forEach(k => {
-            if (k.startsWith('cache_')) {
-                localStorage.removeItem(k);
-            }
-        });
-        localStorage.setItem('cache_version', CACHE_VERSION);
-        console.log('✅ 캐시 초기화 완료');
-    }
-})();
+// 캐시 버전 체크는 loadVersionFromReadme()에서 수행됨
 
 window.getCachedData = async function(key, fetchFunction) {
     const cacheKey = `cache_${key}`;
@@ -6458,35 +6483,83 @@ window.showInstructorCodeForm = function(code = null) {
         autoCode = `IC-${String(maxCode + 1).padStart(3, '0')}`;
     }
     
-    // 메뉴 목록 정의
-    const menuList = [
-        { id: 'dashboard', name: '대시보드', icon: 'fa-tachometer-alt' },
-        { id: 'instructor-codes', name: '강사코드/권한', icon: 'fa-user-shield' },
-        { id: 'instructors', name: '강사관리', icon: 'fa-user-tie' },
-        { id: 'system-settings', name: '시스템 등록', icon: 'fa-cog' },
-        { id: 'backup-manager', name: 'DB 백업', icon: 'fa-database' },
-        { id: 'notices', name: '공지사항', icon: 'fa-bullhorn' },
-        { id: 'subjects', name: '교과목', icon: 'fa-book' },
-        { id: 'holidays', name: '공휴일', icon: 'fa-calendar-alt' },
-        { id: 'courses', name: '과정관리', icon: 'fa-school' },
-        { id: 'students', name: '학생관리', icon: 'fa-users' },
-        { id: 'class-notes', name: 'SSIRN메모장(수업,기억,정보,etc)', icon: 'fa-book-open' },
-        { id: 'counselings', name: '상담관리', icon: 'fa-comments' },
-        { id: 'timetables', name: '시간표', icon: 'fa-clock' },
-        { id: 'training-logs', name: '훈련일지 관리', icon: 'fa-clipboard-list' },
-        { id: 'rag-documents', name: '문서 관리 (RAG)', icon: 'fa-file-alt' },
-        { id: 'exam-bank', name: '문제은행', icon: 'fa-clipboard-question' },
-        { id: 'online-exam', name: '온라인시험', icon: 'fa-laptop' },
-        { id: 'quick-quiz', name: '선착순 퀴즈', icon: 'fa-bolt' },
-        { id: 'assignments', name: '과제관리', icon: 'fa-tasks' },
-        { id: 'ai-report', name: 'AI 생기부', icon: 'fa-file-alt' },
-        { id: 'ai-timetable', name: 'AI 시간표', icon: 'fa-calendar-alt' },
-        { id: 'ai-training-log', name: 'AI 훈련일지', icon: 'fa-brain' },
-        { id: 'ai-counseling', name: 'AI 상담일지', icon: 'fa-comments' },
-        { id: 'aesong-3d-chat', name: '🐶 예진이 만나기', icon: 'fa-robot' },
-        { id: 'projects', name: '팀 관리', icon: 'fa-users' },
-        { id: 'team-activity-logs', name: '팀 활동일지', icon: 'fa-clipboard-list' }
+    // 메뉴 목록 정의 (계층 구조)
+    const menuStructure = [
+        { id: 'dashboard', name: '대시보드', icon: 'fa-tachometer-alt', children: [] },
+        {
+            id: 'system-menu', name: '시스템관리', icon: 'fa-cogs',
+            children: [
+                { id: 'instructor-codes', name: '강사코드/권한', icon: 'fa-user-shield' },
+                { id: 'instructors', name: '강사관리', icon: 'fa-user-tie' },
+                { id: 'system-settings', name: '시스템 등록', icon: 'fa-cog' },
+                { id: 'backup-manager', name: 'DB 관리', icon: 'fa-database' },
+                { id: 'notices', name: '공지사항', icon: 'fa-bullhorn' }
+            ]
+        },
+        {
+            id: 'course-menu', name: '과정', icon: 'fa-graduation-cap',
+            children: [
+                { id: 'subjects', name: '교과목', icon: 'fa-book' },
+                { id: 'holidays', name: '공휴일', icon: 'fa-calendar-alt' },
+                { id: 'courses', name: '과정관리', icon: 'fa-school' }
+            ]
+        },
+        {
+            id: 'student-menu', name: '학생', icon: 'fa-user-graduate',
+            children: [
+                { id: 'students', name: '학생관리', icon: 'fa-users' },
+                { id: 'counselings', name: '상담관리', icon: 'fa-comments' }
+            ]
+        },
+        {
+            id: 'lecture-menu', name: '강의', icon: 'fa-chalkboard',
+            children: [
+                { id: 'timetables', name: '시간표', icon: 'fa-clock' },
+                { id: 'training-logs', name: '훈련일지 관리', icon: 'fa-clipboard-list' },
+                { id: 'rag-documents', name: '문서 관리 (RAG)', icon: 'fa-file-alt' }
+            ]
+        },
+        {
+            id: 'grade-menu', name: '성적', icon: 'fa-chart-line',
+            children: [
+                { id: 'exam-bank', name: '문제은행', icon: 'fa-clipboard-question' },
+                { id: 'online-exam', name: '온라인시험', icon: 'fa-laptop' },
+                { id: 'quick-quiz', name: '선착순 퀴즈', icon: 'fa-bolt' },
+                { id: 'assignments', name: '과제관리', icon: 'fa-tasks' }
+            ]
+        },
+        {
+            id: 'ai-menu', name: 'AI', icon: 'fa-robot',
+            children: [
+                { id: 'class-notes', name: 'SSIRN메모장', icon: 'fa-book-open' },
+                { id: 'ai-report', name: 'AI 생기부', icon: 'fa-file-alt' },
+                { id: 'ai-timetable', name: 'AI 시간표', icon: 'fa-calendar-alt' },
+                { id: 'ai-training-log', name: 'AI 훈련일지', icon: 'fa-brain' },
+                { id: 'ai-counseling', name: 'AI 상담일지', icon: 'fa-comments' },
+                { id: 'aesong-3d-chat', name: '예진이 만나기', icon: 'fa-dog' }
+            ]
+        },
+        {
+            id: 'team-menu', name: '팀', icon: 'fa-users',
+            children: [
+                { id: 'projects', name: '팀 관리', icon: 'fa-users' },
+                { id: 'team-activity-logs', name: '팀 활동일지', icon: 'fa-clipboard-list' }
+            ]
+        }
     ];
+
+    // 모든 메뉴 ID 추출 (저장용)
+    const getAllMenuIds = () => {
+        const ids = [];
+        menuStructure.forEach(menu => {
+            if (menu.children.length === 0) {
+                ids.push(menu.id);
+            } else {
+                menu.children.forEach(child => ids.push(child.id));
+            }
+        });
+        return ids;
+    };
     
     formDiv.innerHTML = `
         <h3 class="text-lg font-semibold mb-4">${code ? '강사코드/권한 수정' : '강사코드/권한 추가'}</h3>
@@ -6537,29 +6610,90 @@ window.showInstructorCodeForm = function(code = null) {
                     <strong class="text-blue-600">관리자(타입 IC-999)</strong>는 모든 메뉴에 자동 접근 가능합니다.
                     <br>
                     <i class="fas fa-home mr-2 text-green-500"></i>
-                    <strong class="text-green-600">초기 화면</strong>을 선택하면 로그인 시 해당 메뉴로 자동 이동합니다.
+                    <strong class="text-green-600">라디오버튼으로 초기 화면</strong>을 선택하면 로그인 시 해당 메뉴로 자동 이동합니다.
+                    <br>
+                    <i class="fas fa-folder mr-2 text-orange-500"></i>
+                    <strong class="text-orange-600">상위 메뉴</strong>를 해제하면 하위 메뉴도 자동 해제됩니다.
                 </p>
-                <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
-                    ${menuList.map(menu => `
-                        <label class="flex items-center justify-between bg-white p-3 rounded border hover:bg-blue-50 transition-all">
-                            <div class="flex items-center space-x-2 cursor-pointer">
-                                <input type="checkbox" 
-                                       class="permission-checkbox w-4 h-4 text-blue-600 rounded focus:ring-blue-500" 
-                                       data-menu-id="${menu.id}"
-                                       ${existingMenuPermissions.includes(menu.id) || existingPermissions[menu.id] ? 'checked' : ''}>
-                                <span class="text-sm">
-                                    <i class="fas ${menu.icon} mr-1 text-gray-500"></i>
-                                    ${menu.name}
-                                </span>
-                            </div>
-                            <input type="radio" 
-                                   name="default-screen" 
-                                   class="default-screen-radio w-4 h-4 text-green-600 focus:ring-green-500 cursor-pointer" 
-                                   data-menu-id="${menu.id}"
-                                   title="초기 화면으로 설정"
-                                   ${existingCode?.default_screen === menu.id ? 'checked' : ''}>
-                        </label>
-                    `).join('')}
+                <div class="space-y-3">
+                    ${menuStructure.map(menu => {
+                        if (menu.children.length === 0) {
+                            // 단일 메뉴 (대시보드)
+                            return `
+                                <div class="bg-white border rounded-lg p-3">
+                                    <label class="flex items-center justify-between cursor-pointer">
+                                        <div class="flex items-center space-x-2">
+                                            <input type="checkbox"
+                                                   class="permission-checkbox w-5 h-5 text-blue-600 rounded focus:ring-blue-500"
+                                                   data-menu-id="${menu.id}"
+                                                   ${existingMenuPermissions.includes(menu.id) || existingPermissions[menu.id] ? 'checked' : ''}>
+                                            <span class="font-semibold text-gray-800">
+                                                <i class="fas ${menu.icon} mr-2 text-blue-600"></i>
+                                                ${menu.name}
+                                            </span>
+                                        </div>
+                                        <input type="radio"
+                                               name="default-screen"
+                                               class="default-screen-radio w-4 h-4 text-green-600 focus:ring-green-500 cursor-pointer"
+                                               data-menu-id="${menu.id}"
+                                               title="초기 화면으로 설정"
+                                               ${existingCode?.default_screen === menu.id ? 'checked' : ''}>
+                                    </label>
+                                </div>
+                            `;
+                        } else {
+                            // 계층 메뉴
+                            const childIds = menu.children.map(c => c.id);
+                            const allChecked = childIds.every(id => existingMenuPermissions.includes(id) || existingPermissions[id]);
+                            const someChecked = childIds.some(id => existingMenuPermissions.includes(id) || existingPermissions[id]);
+
+                            return `
+                                <div class="bg-white border-2 border-blue-200 rounded-lg overflow-hidden shadow-sm" data-menu-group="${menu.id}">
+                                    <!-- 상위 메뉴 헤더 (테마색) -->
+                                    <div class="bg-gradient-to-r from-blue-600 to-blue-700 px-4 py-3">
+                                        <label class="flex items-center space-x-2 cursor-pointer">
+                                            <input type="checkbox"
+                                                   class="parent-checkbox w-5 h-5 bg-white/20 border-2 border-white rounded focus:ring-white"
+                                                   data-parent-id="${menu.id}"
+                                                   data-children="${childIds.join(',')}"
+                                                   ${allChecked || someChecked ? 'checked' : ''}
+                                                   onchange="window.toggleParentMenu(this)">
+                                            <span class="font-semibold text-white">
+                                                <i class="fas ${menu.icon} mr-2"></i>
+                                                ${menu.name}
+                                            </span>
+                                            <span class="text-xs text-blue-200 ml-2">(${menu.children.length}개)</span>
+                                        </label>
+                                    </div>
+                                    <!-- 하위 메뉴 목록 -->
+                                    <div class="p-3 grid grid-cols-2 md:grid-cols-3 gap-2 children-container" data-parent="${menu.id}" style="${allChecked || someChecked ? '' : 'display:none'}">
+                                        ${menu.children.map(child => `
+                                            <label class="flex items-center justify-between bg-gray-50 p-2 rounded border hover:bg-blue-50 transition-all cursor-pointer">
+                                                <div class="flex items-center space-x-2">
+                                                    <input type="checkbox"
+                                                           class="permission-checkbox child-checkbox w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
+                                                           data-menu-id="${child.id}"
+                                                           data-parent="${menu.id}"
+                                                           ${existingMenuPermissions.includes(child.id) || existingPermissions[child.id] ? 'checked' : ''}
+                                                           onchange="window.updateParentCheckbox('${menu.id}')">
+                                                    <span class="text-sm text-gray-700">
+                                                        <i class="fas ${child.icon} mr-1 text-gray-500"></i>
+                                                        ${child.name}
+                                                    </span>
+                                                </div>
+                                                <input type="radio"
+                                                       name="default-screen"
+                                                       class="default-screen-radio w-4 h-4 text-green-600 focus:ring-green-500 cursor-pointer"
+                                                       data-menu-id="${child.id}"
+                                                       title="초기 화면으로 설정"
+                                                       ${existingCode?.default_screen === child.id ? 'checked' : ''}>
+                                            </label>
+                                        `).join('')}
+                                    </div>
+                                </div>
+                            `;
+                        }
+                    }).join('')}
                 </div>
             </div>
         </div>
@@ -6577,10 +6711,55 @@ window.showInstructorCodeForm = function(code = null) {
 
 // 권한 전체 선택/해제
 window.selectAllPermissions = function(selectAll) {
+    // 모든 권한 체크박스 선택/해제
     const checkboxes = document.querySelectorAll('.permission-checkbox');
     checkboxes.forEach(cb => {
         cb.checked = selectAll;
     });
+    // 부모 체크박스도 업데이트
+    const parentCheckboxes = document.querySelectorAll('.parent-checkbox');
+    parentCheckboxes.forEach(cb => {
+        cb.checked = selectAll;
+    });
+    // 하위 메뉴 영역 표시/숨김
+    const childrenContainers = document.querySelectorAll('.children-container');
+    childrenContainers.forEach(container => {
+        container.style.display = selectAll ? '' : 'none';
+    });
+};
+
+// 상위 메뉴 체크박스 토글 (자식들 일괄 처리 + UI 표시/숨김)
+window.toggleParentMenu = function(parentCheckbox) {
+    const isChecked = parentCheckbox.checked;
+    const parentId = parentCheckbox.getAttribute('data-parent-id');
+    const childIds = parentCheckbox.getAttribute('data-children').split(',');
+
+    // 자식 체크박스들 일괄 처리
+    childIds.forEach(childId => {
+        const childCheckbox = document.querySelector(`.child-checkbox[data-menu-id="${childId}"]`);
+        if (childCheckbox) {
+            childCheckbox.checked = isChecked;
+        }
+    });
+
+    // 하위 메뉴 영역 표시/숨김
+    const childrenContainer = document.querySelector(`.children-container[data-parent="${parentId}"]`);
+    if (childrenContainer) {
+        childrenContainer.style.display = isChecked ? '' : 'none';
+    }
+};
+
+// 하위 메뉴 변경 시 상위 메뉴 체크박스 상태 업데이트
+window.updateParentCheckbox = function(parentId) {
+    const parentCheckbox = document.querySelector(`.parent-checkbox[data-parent-id="${parentId}"]`);
+    if (!parentCheckbox) return;
+
+    const childCheckboxes = document.querySelectorAll(`.child-checkbox[data-parent="${parentId}"]`);
+    const allChecked = Array.from(childCheckboxes).every(cb => cb.checked);
+    const someChecked = Array.from(childCheckboxes).some(cb => cb.checked);
+
+    parentCheckbox.checked = allChecked;
+    parentCheckbox.indeterminate = !allChecked && someChecked;
 };
 
 window.hideInstructorCodeForm = function() {
@@ -14940,27 +15119,18 @@ async function applyMenuPermissions() {
         menuButtons.forEach(button => {
             const menuId = button.getAttribute('data-tab');
             
-            // aesong-3d-chat은 모든 강사에게 자동으로 허용 (백엔드 정책과 일치)
-            const hasPermission = allowedMenus.includes(menuId) || menuId === 'aesong-3d-chat';
+            // 권한 체크
+            const hasPermission = allowedMenus.includes(menuId);
             
             if (!hasPermission) {
-                // 권한 없음 - 비활성화 및 시각적 피드백
-                button.disabled = true;
-                button.style.opacity = '0.5';
-                button.style.cursor = 'not-allowed';
-                button.title = '접근 권한이 없습니다';
-                
-                // 클릭 이벤트 차단
-                button.addEventListener('click', (e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    window.showAlert('접근 권한이 없습니다.');
-                }, true);
-                
+                // 권한 없음 - 메뉴 숨김
+                button.style.display = 'none';
+
                 disabledCount++;
-                console.log(`❌ 메뉴 비활성화: ${menuId}`);
+                console.log(`🙈 메뉴 숨김: ${menuId}`);
             } else {
-                // 권한 있음 - 활성화
+                // 권한 있음 - 활성화 및 표시
+                button.style.display = '';
                 button.disabled = false;
                 button.style.opacity = '1';
                 button.style.cursor = 'pointer';
@@ -14969,8 +15139,22 @@ async function applyMenuPermissions() {
                 console.log(`✅ 메뉴 활성화: ${menuId}`);
             }
         });
-        
-        console.log(`✅ 메뉴 권한 적용 완료 - 활성화: ${enabledCount}개, 비활성화: ${disabledCount}개`);
+
+        // 상위 메뉴(드롭다운) 숨김 처리 - 하위 메뉴가 모두 숨겨진 경우
+        const dropdownMenus = document.querySelectorAll('nav .relative.group');
+        dropdownMenus.forEach(dropdown => {
+            const childButtons = dropdown.querySelectorAll('[data-tab]');
+            const visibleChildren = Array.from(childButtons).filter(btn => btn.style.display !== 'none');
+
+            if (visibleChildren.length === 0) {
+                dropdown.style.display = 'none';
+                console.log('🙈 상위 메뉴 숨김 (하위 메뉴 없음)');
+            } else {
+                dropdown.style.display = '';
+            }
+        });
+
+        console.log(`✅ 메뉴 권한 적용 완료 - 표시: ${enabledCount}개, 숨김: ${disabledCount}개`);
     } catch (error) {
         console.error('❌ 메뉴 권한 조회 실패:', error);
     }
