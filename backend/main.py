@@ -95,10 +95,10 @@ async def serve_glb_file_api(filename: str):
 
 # 데이터베이스 연결 설정 (환경 변수에서 로드)
 DB_CONFIG = {
-    'host': os.getenv('DB_HOST', 'www.kdt2025.com'),
+    'host': os.getenv('DB_HOST', 'localhost'),
     'user': os.getenv('DB_USER', 'iyrc'),
-    'passwd': os.getenv('DB_PASSWORD', 'dodan1004~!@'),
-    'db': os.getenv('DB_NAME', 'bh2025'),
+    'passwd': os.getenv('DB_PASSWORD', 'dodan1004'),
+    'db': os.getenv('DB_NAME', 'minilms'),
     'charset': 'utf8',
     'port': int(os.getenv('DB_PORT', '3306'))
 }

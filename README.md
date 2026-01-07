@@ -261,6 +261,10 @@ pip install -r requirements.txt
 ## 🎯 최신 업데이트 (v3.5)
 
 ### ✅ 최근 변경사항 (2026-01-07)
+- **데이터베이스 로컬 전환**: 외부 DB(`www.kdt2025.com`) → 로컬 DB(`localhost`)
+  - Host: `www.kdt2025.com` → `localhost`
+  - Database: `bh2025` → `minilms`
+  - 로컬 MariaDB 10.6.22 사용
 - **데이터베이스 이름 변경**: `bh2025` → `minilms`
   - 설정 파일 업데이트 (.env, .env.example)
   - MySQL 데이터베이스 마이그레이션 완료 (19개 테이블 이동)
