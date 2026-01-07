@@ -34,13 +34,22 @@ http://localhost:8000/
 ### 배포 (Cafe24 서버)
 ```bash
 # 최신 코드 받기
-git pull origin hun
+git pull origin main
 
 # DB 마이그레이션 (필요시)
-mysql -h [DB_HOST] -u [DB_USER] -p[DB_PASSWORD] [DB_NAME] < migrations/0003_add_menu_permissions.sql
+mysql -h [DB_HOST] -u [DB_USER] -p[DB_PASSWORD] minilms < migrations/0003_add_menu_permissions.sql
 
-# PM2 재시작
-pm2 restart wowu-backend
+# 서비스 재시작
+systemctl restart minilms
+```
+
+### 서비스 관리
+```bash
+systemctl start minilms    # 시작
+systemctl stop minilms     # 중지
+systemctl restart minilms  # 재시작
+systemctl status minilms   # 상태 확인
+journalctl -u minilms -f   # 로그 실시간 확인
 ```
 
 ---
@@ -255,6 +264,9 @@ pip install -r requirements.txt
 - **데이터베이스 이름 변경**: `bh2025` → `minilms`
   - 설정 파일 업데이트 (.env, .env.example)
   - MySQL 데이터베이스 마이그레이션 완료 (19개 테이블 이동)
+- **systemd 서비스 등록**: 서버 부팅 시 자동 시작
+  - 서비스 파일: `/etc/systemd/system/minilms.service`
+  - PM2 대신 systemd로 프로세스 관리
 
 ### ✅ 완료된 기능
 - **문서 관리**: 시스템관리 → 강의 메뉴로 이동, 업로드/다운로드/삭제
