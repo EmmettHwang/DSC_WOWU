@@ -143,16 +143,16 @@
         })();
     </script>
 
-    <!-- 테마 즉시 적용 (페이지 렌더링 전) -->
+    <!-- 테마 및 타이틀 즉시 적용 (페이지 렌더링 전) -->
     <script>
         (function() {
             try {
-                const savedSettings = localStorage.getItem('system_settings');
-                if (savedSettings) {
-                    const settings = JSON.parse(savedSettings);
-                    const themeColor = settings.theme_menubar || settings.themeColor;
+                // 테마 색상 즉시 적용
+                const savedTheme = localStorage.getItem('system_theme');
+                if (savedTheme) {
+                    const theme = JSON.parse(savedTheme);
+                    const themeColor = theme.menubar;
                     if (themeColor) {
-                        // 헤더에 즉시 적용할 스타일 생성
                         const style = document.createElement('style');
                         style.id = 'instant-theme';
                         style.textContent = `
@@ -161,12 +161,17 @@
                             .text-blue-200 { color: rgba(255,255,255,0.7) !important; }
                         `;
                         document.head.appendChild(style);
-                        // 헤더에 클래스 적용을 위해 전역 변수 설정
                         window.__INSTANT_THEME_COLOR__ = themeColor;
                     }
                 }
+
+                // 브라우저 타이틀 즉시 적용
+                const savedTitle = localStorage.getItem('system_title');
+                if (savedTitle) {
+                    document.title = savedTitle;
+                }
             } catch(e) {
-                console.log('테마 즉시 적용 실패:', e);
+                console.log('초기 설정 적용 실패:', e);
             }
         })();
     </script>
@@ -658,7 +663,7 @@
     </script>
     
     <!-- 캐시 버스팅을 위한 버전 쿼리 -->
-    <script src="/app.js?v=1.0.7"></script>
+    <script src="/app.js?v=1.0.8"></script>
     
     <!-- 3D 모듈 (Three.js) -->
     <script type="importmap">

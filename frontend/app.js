@@ -4,7 +4,7 @@ const API_BASE_URL = '';
 window.API_BASE_URL = API_BASE_URL; // 전역으로 노출
 
 // ==================== 앱 버전 및 기본값 관리 ====================
-const APP_VERSION = '1.0.7'; // 앱 버전
+const APP_VERSION = '1.0.8'; // 앱 버전
 const DEFAULT_SYSTEM_TITLE = '바이오헬스교육관리시스템'; // 기본 시스템 제목
 window.APP_VERSION = APP_VERSION;
 window.DEFAULT_SYSTEM_TITLE = DEFAULT_SYSTEM_TITLE;
@@ -14132,7 +14132,11 @@ window.saveSystemSettings = async function() {
     const systemSubtitle1 = subtitle1Element.value;
     const systemSubtitle2 = subtitle2Element.value;
     const logoUrl = logoElement.value;
-    
+
+    // 시스템 타이틀을 localStorage에 저장 (즉시 로딩용)
+    localStorage.setItem('system_title', systemTitle);
+    console.log('💾 시스템 타이틀 저장:', systemTitle);
+
     // YouTube API 키 저장
     const youtubeApiKey = document.getElementById('youtube-api-key')?.value || '';
     localStorage.setItem('youtube_api_key', youtubeApiKey);
@@ -14251,9 +14255,13 @@ async function updateHeader() {
         
         // 제목 업데이트
         const titleTextElement = document.getElementById('system-title-text');
+        const systemTitle = settings.system_title || DEFAULT_SYSTEM_TITLE;
         if (titleTextElement) {
-            titleTextElement.textContent = settings.system_title || DEFAULT_SYSTEM_TITLE;
+            titleTextElement.textContent = systemTitle;
         }
+
+        // 브라우저 타이틀 업데이트
+        document.title = systemTitle;
         
         // 부제목 1 업데이트
         const subtitle1Element = document.getElementById('system-subtitle1-header');
