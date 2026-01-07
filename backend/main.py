@@ -8382,12 +8382,122 @@ except:
 
 
 # ==================== Startup 이벤트 ====================
+def auto_migrate_tables():
+    """서버 시작 시 필수 테이블 자동 생성/마이그레이션"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # exam_bank 테이블
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS exam_bank (
+                exam_id INT AUTO_INCREMENT PRIMARY KEY,
+                exam_name VARCHAR(200) NOT NULL,
+                subject VARCHAR(100),
+                exam_date DATE,
+                exam_time TIME,
+                total_questions INT DEFAULT 0,
+                question_type VARCHAR(50) DEFAULT 'multiple_choice',
+                difficulty VARCHAR(20) DEFAULT 'medium',
+                instructor_code VARCHAR(50),
+                description TEXT,
+                questions_text LONGTEXT,
+                sources TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        # exam_bank_questions 테이블
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS exam_bank_questions (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                exam_id INT NOT NULL,
+                question_number INT,
+                question_text TEXT,
+                question_type VARCHAR(50) DEFAULT 'multiple_choice',
+                options TEXT,
+                correct_answer VARCHAR(500),
+                explanation TEXT,
+                source_reference VARCHAR(500),
+                points INT DEFAULT 10,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (exam_id) REFERENCES exam_bank(exam_id) ON DELETE CASCADE
+            )
+        """)
+
+        # online_exams 테이블
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS online_exams (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                title VARCHAR(200) NOT NULL,
+                exam_type ENUM('exam', 'quiz', 'assignment') DEFAULT 'exam',
+                exam_bank_id INT,
+                course_code VARCHAR(50),
+                instructor_code VARCHAR(50),
+                duration INT DEFAULT 60,
+                scheduled_at DATETIME,
+                started_at DATETIME,
+                ended_at DATETIME,
+                deadline DATETIME,
+                description TEXT,
+                pass_score INT DEFAULT 60,
+                shuffle_questions TINYINT DEFAULT 0,
+                shuffle_options TINYINT DEFAULT 0,
+                show_result TINYINT DEFAULT 1,
+                status ENUM('scheduled', 'waiting', 'ongoing', 'ended', 'graded') DEFAULT 'scheduled',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (exam_bank_id) REFERENCES exam_bank(exam_id) ON DELETE SET NULL
+            )
+        """)
+
+        # online_exam_participants 테이블
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS online_exam_participants (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                online_exam_id INT NOT NULL,
+                student_id INT NOT NULL,
+                status ENUM('waiting', 'taking', 'submitted', 'graded') DEFAULT 'waiting',
+                entered_at DATETIME,
+                started_at DATETIME,
+                submitted_at DATETIME,
+                answers JSON,
+                file_path VARCHAR(500),
+                file_name VARCHAR(255),
+                score INT,
+                feedback TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (online_exam_id) REFERENCES online_exams(id) ON DELETE CASCADE
+            )
+        """)
+
+        # notices 테이블 컬럼 추가
+        try:
+            cursor.execute("ALTER TABLE notices ADD COLUMN notice_type ENUM('all', 'course', 'subject') DEFAULT 'all'")
+        except:
+            pass
+        try:
+            cursor.execute("ALTER TABLE notices ADD COLUMN target_code VARCHAR(50) DEFAULT NULL")
+        except:
+            pass
+
+        conn.commit()
+        conn.close()
+        print("[OK] 테이블 자동 마이그레이션 완료")
+        return True
+    except Exception as e:
+        print(f"[WARN] 테이블 마이그레이션 중 오류 (무시됨): {str(e)}")
+        return False
+
+
 @app.on_event("startup")
 async def startup_event():
     """서버 시작 시 실행"""
     print("\n" + "="*60)
     print("[START] BH2025 WOWU Backend Server Started")
     print("="*60)
+
+    # 자동 마이그레이션 실행
+    auto_migrate_tables()
     
     # 등록된 라우트 확인
     print("\n[LIST] Registered API Endpoints:")
