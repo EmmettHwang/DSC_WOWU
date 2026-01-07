@@ -4,7 +4,7 @@ const API_BASE_URL = '';
 window.API_BASE_URL = API_BASE_URL; // 전역으로 노출
 
 // ==================== 앱 버전 및 기본값 관리 ====================
-const APP_VERSION = '1.1.2'; // 앱 버전
+const APP_VERSION = '1.1.202601080110'; // 앱 버전 (v메이저.마이너.년월일시분)
 const DEFAULT_SYSTEM_TITLE = '교육관리시스템'; // 기본 시스템 제목
 window.APP_VERSION = APP_VERSION;
 window.DEFAULT_SYSTEM_TITLE = DEFAULT_SYSTEM_TITLE;
