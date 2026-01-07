@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 from fastapi import FastAPI, File, UploadFile, HTTPException, Query, Form, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, FileResponse, HTMLResponse
+from fastapi.responses import JSONResponse, FileResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from typing import Optional, List
 import pymysql
@@ -5712,6 +5712,29 @@ def ensure_system_settings_table(cursor):
         print("[OK] system_settings 테이블 확인/생성 완료")
     except Exception as e:
         print(f"[WARN] system_settings 테이블 생성 실패: {e}")
+
+@app.get("/api/og-logo")
+async def get_og_logo():
+    """Open Graph용 로고 이미지 - 시스템 설정의 로고로 리다이렉트"""
+    conn = get_db_connection()
+    cursor = conn.cursor(pymysql.cursors.DictCursor)
+
+    try:
+        cursor.execute("SELECT setting_value FROM system_settings WHERE setting_key = 'logo_url'")
+        result = cursor.fetchone()
+
+        if result and result['setting_value']:
+            logo_url = result['setting_value']
+            # FTP URL인 경우 download-image API로 변환
+            if logo_url.startswith('ftp://'):
+                return RedirectResponse(url=f"/api/download-image?url={logo_url}")
+            return RedirectResponse(url=logo_url)
+        else:
+            # 기본 로고로 리다이렉트
+            return RedirectResponse(url="/woosong-logo.png")
+    finally:
+        cursor.close()
+        conn.close()
 
 @app.get("/api/system-settings")
 async def get_system_settings():
