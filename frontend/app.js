@@ -3,6 +3,10 @@
 const API_BASE_URL = '';
 window.API_BASE_URL = API_BASE_URL; // 전역으로 노출
 
+// ==================== 앱 버전 관리 ====================
+const APP_VERSION = '3.5.1'; // 앱 버전 (README.md와 동기화)
+window.APP_VERSION = APP_VERSION;
+
 // YouTube API cross-origin 에러 무시 (sandbox 환경)
 window.addEventListener('error', function(event) {
     if (event.message && event.message.includes('www-widgetapi.js')) {
@@ -12,7 +16,7 @@ window.addEventListener('error', function(event) {
 }, true);
 
 // ==================== 로컬 캐싱 유틸리티 ====================
-const CACHE_VERSION = '2.0.75'; // 캐시 버전 (업데이트 시 증가)
+const CACHE_VERSION = APP_VERSION; // 캐시 버전 (앱 버전과 동기화)
 const CACHE_DURATION = 5 * 60 * 1000; // 5분 캐시
 
 // 캐시 버전 체크 및 초기화
@@ -14242,7 +14246,7 @@ async function updateHeader() {
         // 제목 업데이트 (버전 포함)
         const titleElement = document.getElementById('system-title-header');
         if (titleElement) {
-            titleElement.innerHTML = `<i class="fas fa-school mr-3"></i>${settings.system_title || '바이오헬스교육관리시스템'}<span class="ml-3 text-sm font-normal bg-blue-500 text-white px-2 py-1 rounded">v2.0.120</span>`;
+            titleElement.innerHTML = `<i class="fas fa-school mr-3"></i>${settings.system_title || '바이오헬스교육관리시스템'}<span class="ml-3 text-sm font-normal bg-blue-500 text-white px-2 py-1 rounded">v${APP_VERSION}</span>`;
         }
         
         // 부제목 1 업데이트
