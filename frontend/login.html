@@ -56,12 +56,20 @@
         var __LOGO_URL__ = null;
         try {
             const savedTheme = localStorage.getItem('system_theme');
+            console.log('📦 저장된 테마:', savedTheme);
             if (savedTheme) {
                 const theme = JSON.parse(savedTheme);
-                if (theme.menubar) __THEME_COLOR__ = theme.menubar;
+                console.log('🎨 파싱된 테마:', theme);
+                if (theme && theme.menubar) {
+                    __THEME_COLOR__ = theme.menubar;
+                    console.log('✅ 테마 색상:', __THEME_COLOR__);
+                }
             }
             __LOGO_URL__ = localStorage.getItem('logo_url');
-        } catch(e) {}
+            console.log('🖼️ 로고 URL:', __LOGO_URL__);
+        } catch(e) {
+            console.error('❌ 테마 로드 오류:', e);
+        }
     </script>
 </head>
 <body class="bg-gradient-to-br from-blue-50 to-indigo-100 min-h-screen flex items-center justify-center">
