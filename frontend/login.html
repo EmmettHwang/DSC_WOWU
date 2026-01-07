@@ -155,13 +155,10 @@
                     </div>
                     
                     <!-- 로그인 버튼 -->
-                    <button 
-                        type="submit" 
-                        id="loginButton"
-                        class="w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-bold py-3 rounded-lg transition-all transform hover:scale-[1.02] active:scale-[0.98] shadow-lg"
-                    >
-                        <i class="fas fa-sign-in-alt mr-2"></i>로그인
-                    </button>
+                    <script>
+                        var btnColor = __THEME_COLOR__ || '#3173f1';
+                        document.write('<button type="submit" id="loginButton" class="w-full text-white font-bold py-3 rounded-lg transition-all transform hover:scale-[1.02] active:scale-[0.98] shadow-lg hover:opacity-90" style="background: ' + btnColor + ';"><i class="fas fa-sign-in-alt mr-2"></i>로그인</button>');
+                    </script>
                 </form>
                 
                 <!-- 학생 로그인 폼 제거 -->
