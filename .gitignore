@@ -54,5 +54,8 @@ backend/backend/model_cache/
 backend/vector_db/
 **/vector_db/
 
+# RAG 문서
+backend/rag_documents/
+
 # Claude settings
 .claude/
