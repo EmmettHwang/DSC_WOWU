@@ -6522,13 +6522,13 @@ window.showInstructorCodeForm = function(code = null) {
             children: [
                 { id: 'timetables', name: '시간표', icon: 'fa-clock' },
                 { id: 'training-logs', name: '훈련일지 관리', icon: 'fa-clipboard-list' },
-                { id: 'rag-documents', name: '문서 관리 (RAG)', icon: 'fa-file-alt' }
+                { id: 'rag-documents', name: '문서 관리 (RAG)', icon: 'fa-file-alt' },
+                { id: 'exam-bank', name: '문제은행', icon: 'fa-clipboard-question' }
             ]
         },
         {
             id: 'grade-menu', name: '성적', icon: 'fa-chart-line',
             children: [
-                { id: 'exam-bank', name: '문제은행', icon: 'fa-clipboard-question' },
                 { id: 'online-exam', name: '온라인시험', icon: 'fa-laptop' },
                 { id: 'quick-quiz', name: '선착순 퀴즈', icon: 'fa-bolt' },
                 { id: 'assignments', name: '과제관리', icon: 'fa-tasks' }
