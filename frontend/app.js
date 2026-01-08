@@ -3,6 +3,10 @@
 const API_BASE_URL = '';
 window.API_BASE_URL = API_BASE_URL; // 전역으로 노출
 
+// ==================== 디버그 모드 설정 ====================
+const DEBUG_MODE = false; // 프로덕션에서는 false로 설정
+const debugLog = DEBUG_MODE ? console.log.bind(console) : () => {};
+
 // ==================== 앱 버전 및 기본값 관리 ====================
 let APP_VERSION = 'loading...'; // 앱 버전 (README.md에서 자동 로드)
 const DEFAULT_SYSTEM_TITLE = '교육관리시스템'; // 기본 시스템 제목
